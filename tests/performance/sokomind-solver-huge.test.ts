@@ -15,7 +15,9 @@ import {
 import { verifySolverSolution } from "../../src/solver/verification.ts";
 
 const MAXIMUMS = Object.freeze({
-  elapsedMs: 60_000,
+  searchElapsedMs: 60_000,
+  rewriteElapsedMs: 90_000,
+  totalElapsedMs: 180_000,
   moves: 1_300,
   pushes: 350,
   visited: 2_500,
@@ -59,7 +61,9 @@ function requestFor(puzzle: PuzzleDefinition): SolverRequest {
   };
 }
 
-test("Sokomind Solver replay-solves Grand Hall in three orientations", () => {
+test("Sokomind Solver replay-solves Grand Hall in three orientations", {
+  timeout: MAXIMUMS.totalElapsedMs + 30_000,
+}, () => {
   const huge = PUZZLE_BY_ID.huge;
   assert.ok(huge);
   const cases = [
@@ -69,6 +73,7 @@ test("Sokomind Solver replay-solves Grand Hall in three orientations", () => {
   ] as const;
   const originalPostMessage = globalThis.postMessage;
   globalThis.postMessage = (() => {}) as typeof globalThis.postMessage;
+  const suiteStarted = performance.now();
 
   try {
     for (const [name, rows] of cases) {
@@ -105,7 +110,10 @@ test("Sokomind Solver replay-solves Grand Hall in three orientations", () => {
         true,
         `${name} replay`,
       );
-      assert.ok(elapsedMs <= MAXIMUMS.elapsedMs, `${name} elapsed`);
+      assert.ok(
+        elapsedMs <= MAXIMUMS.searchElapsedMs,
+        `${name} search elapsed`,
+      );
       assert.ok(solution.moves <= MAXIMUMS.moves, `${name} moves`);
       assert.ok(solution.pushes <= MAXIMUMS.pushes, `${name} pushes`);
       assert.ok(
@@ -137,6 +145,7 @@ test("Sokomind Solver replay-solves Grand Hall in three orientations", () => {
         `${name} deterministic result`,
       );
       if (name === "base") {
+        const rewriteStarted = performance.now();
         const rewrite = search({
           algorithm: "solution-window-rewrite",
           state: toLegacyState(request),
@@ -156,6 +165,11 @@ test("Sokomind Solver replay-solves Grand Hall in three orientations", () => {
           moveWindowExtraPushes: 4,
           moveWindowMinimumOverhead: 6,
         });
+        const rewriteElapsedMs = performance.now() - rewriteStarted;
+        assert.ok(
+          rewriteElapsedMs <= MAXIMUMS.rewriteElapsedMs,
+          `base rewrite elapsed ${Math.round(rewriteElapsedMs)}ms`,
+        );
         assert.ok(Array.isArray(rewrite.path), "base rewrite path");
         const rewrittenSolution = solutionFromLegacyPath(
           request,
@@ -177,6 +191,16 @@ test("Sokomind Solver replay-solves Grand Hall in three orientations", () => {
           REVIEWED_REWRITE_RESULT,
           "base deterministic rewrite",
         );
+        console.info(
+          JSON.stringify({
+            name: "base-rewrite",
+            elapsedMs: Math.round(rewriteElapsedMs),
+            moves: rewrittenSolution.moves,
+            pushes: rewrittenSolution.pushes,
+            visited: rewrite.visited,
+            moveVisited: rewrite.moveVisited,
+          }),
+        );
       }
       console.info(
         JSON.stringify({
@@ -191,6 +215,14 @@ test("Sokomind Solver replay-solves Grand Hall in three orientations", () => {
         }),
       );
     }
+    const totalElapsedMs = performance.now() - suiteStarted;
+    assert.ok(
+      totalElapsedMs <= MAXIMUMS.totalElapsedMs,
+      `total elapsed ${Math.round(totalElapsedMs)}ms`,
+    );
+    console.info(
+      JSON.stringify({ name: "total", elapsedMs: Math.round(totalElapsedMs) }),
+    );
   } finally {
     if (originalPostMessage === undefined) {
       Reflect.deleteProperty(globalThis, "postMessage");

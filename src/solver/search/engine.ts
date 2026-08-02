@@ -234,7 +234,7 @@ export function movedBoxes(
   return result;
 }
 
-function estimateStaticBytes(board: CompiledSearchBoard): number {
+export function estimateStaticSearchBytes(board: CompiledSearchBoard): number {
   const goalCount = [...board.goalCellsByLabel.values()].reduce(
     (total, cells) => total + cells.length,
     0,
@@ -434,7 +434,7 @@ export async function runClassicSearch(
     const heuristic = new AssignmentHeuristic(board);
     const reachability = new KeeperReachability(board);
     const childReachability = new KeeperReachability(board);
-    const staticBytes = estimateStaticBytes(board);
+    const staticBytes = estimateStaticSearchBytes(board);
     const initialRobot = board.cellAt(
       request.snapshot.robot.row,
       request.snapshot.robot.column,

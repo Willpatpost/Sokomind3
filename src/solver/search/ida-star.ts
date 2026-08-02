@@ -28,6 +28,7 @@ import {
   fillDeadlockOccupancy,
   stateKey,
   delayForEventLoop,
+  estimateStaticSearchBytes,
   OPPOSITE_DIRECTION,
   PROGRESS_INTERVAL_MS,
   YIELD_INTERVAL_MS,
@@ -70,6 +71,10 @@ interface StackFrame {
   reachabilitySnapshot: ReachabilitySnapshot | null;
   /** Cached flood result paired with the snapshot. */
   cachedReachable: KeeperReachabilityResult | null;
+  /** Conservative retained bytes excluding the reachability snapshot. */
+  estimatedStackBytes: number;
+  /** Conservative retained bytes for the saved reachability state/result. */
+  estimatedReachabilityBytes: number;
 }
 
 interface SearchCounters {
@@ -82,6 +87,19 @@ interface SearchCounters {
   peakStackDepth: number;
   maxDepth: number;
   iterations: number;
+}
+
+interface IdaMemoryBreakdown {
+  readonly staticBytes: number;
+  readonly transpositionBytes: number;
+  readonly heuristicCacheBytes: number;
+  readonly dfsStackBytes: number;
+  readonly reachabilitySnapshotBytes: number;
+  readonly currentBytes: number;
+}
+
+interface IdaMemorySnapshot extends IdaMemoryBreakdown {
+  readonly peakBytes: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,12 +166,129 @@ function isFrozenBoxAt(
   return idx >= 0 && frozen[idx];
 }
 
+const IDA_RUNTIME_BASE_BYTES = 2_048;
+const IDA_REUSABLE_BUFFER_BASE_BYTES = 256;
+const IDA_HEURISTIC_WORKSPACE_BASE_BYTES = 512;
+const IDA_TRANSPOSITION_BASE_BYTES = 256;
+const IDA_DFS_STACK_BASE_BYTES = 128;
+
+/**
+ * Static reservation for allocations that exist for the whole IDA* run.
+ *
+ * The shared compiled-board estimate already includes topology, reverse-push
+ * tables, maps, and the reusable reachability workspace. IDA* adds its two
+ * occupancy buffers plus a padded worst-case assignment matrix workspace.
+ * Counting the transient heuristic workspace for the full run is deliberate:
+ * memory limits are conservative ceilings rather than heap-profiler samples.
+ */
+function estimateIdaStaticBytes(
+  board: CompiledSearchBoard,
+  boxCount: number,
+): number {
+  const reusableBufferBytes =
+    IDA_REUSABLE_BUFFER_BASE_BYTES +
+    board.cellCount *
+      (Uint8Array.BYTES_PER_ELEMENT + Int32Array.BYTES_PER_ELEMENT);
+  const heuristicWorkspaceBytes =
+    IDA_HEURISTIC_WORKSPACE_BASE_BYTES +
+    boxCount * 160 +
+    boxCount * boxCount * 16;
+  return Math.ceil(
+    estimateStaticSearchBytes(board) +
+      IDA_RUNTIME_BASE_BYTES +
+      reusableBufferBytes +
+      heuristicWorkspaceBytes,
+  );
+}
+
+function estimateHeuristicCacheBytes(
+  cacheEntries: number,
+  boxCount: number,
+): number {
+  // Mirrors the deliberately padded cache-entry estimate in classic search.
+  return cacheEntries * (160 + boxCount * 24);
+}
+
+function estimateTranspositionEntryBytes(key: string): number {
+  // Map entry, numeric g-cost, and the retained UTF-16 state key.
+  return 128 + key.length * 2;
+}
+
+function estimateStackFrameBytes(
+  boxes: readonly DenseBox[],
+  boxSignature: string,
+  hasPush: boolean,
+): number {
+  // Frame/array overhead, canonical box records, signature, and push record.
+  return (
+    448 +
+    boxes.length * 80 +
+    boxSignature.length * 2 +
+    (hasPush ? 64 : 0)
+  );
+}
+
+function estimateFrozenBoxesBytes(boxCount: number): number {
+  return 64 + boxCount * 8;
+}
+
+function estimateReachabilitySnapshotBytes(cellCount: number): number {
+  // Four copied typed arrays (13 payload bytes/cell), their headers, and the
+  // cached reachability result with its bound query closures.
+  return 640 + cellCount * 13;
+}
+
+function estimateIdaCurrentBytes(
+  staticBytes: number,
+  transpositionBytes: number,
+  heuristicCacheBytes: number,
+  dfsStackBytes: number,
+  reachabilitySnapshotBytes: number,
+): number {
+  return Math.ceil(
+    staticBytes +
+      transpositionBytes +
+      heuristicCacheBytes +
+      dfsStackBytes +
+      reachabilitySnapshotBytes,
+  );
+}
+
+function estimateIdaMemory(
+  staticBytes: number,
+  transpositionBytes: number,
+  heuristicCacheEntries: number,
+  boxCount: number,
+  dfsStackBytes: number,
+  reachabilitySnapshotBytes: number,
+): IdaMemoryBreakdown {
+  const heuristicCacheBytes = estimateHeuristicCacheBytes(
+    heuristicCacheEntries,
+    boxCount,
+  );
+  return Object.freeze({
+    staticBytes,
+    transpositionBytes,
+    heuristicCacheBytes,
+    dfsStackBytes,
+    reachabilitySnapshotBytes,
+    currentBytes: estimateIdaCurrentBytes(
+      staticBytes,
+      transpositionBytes,
+      heuristicCacheBytes,
+      dfsStackBytes,
+      reachabilitySnapshotBytes,
+    ),
+  });
+}
+
 function createMetrics(
   context: SolverExecutionContext,
   startedAt: number,
   counters: SearchCounters,
   transpositionSize: number,
   heuristic: AssignmentHeuristic,
+  memory: IdaMemorySnapshot,
 ): SolverRunMetrics {
   const heuristicStats = heuristic.stats;
   return {
@@ -174,7 +309,14 @@ function createMetrics(
       heuristicCacheHits: heuristicStats.cacheHits,
       frontierSize: 0,
       maxDepth: counters.maxDepth,
-      estimatedMemoryBytes: 0,
+      estimatedMemoryBytes: memory.currentBytes,
+      currentEstimatedMemoryBytes: memory.currentBytes,
+      peakEstimatedMemoryBytes: memory.peakBytes,
+      memoryStaticBytes: memory.staticBytes,
+      memoryTranspositionBytes: memory.transpositionBytes,
+      memoryHeuristicCacheBytes: memory.heuristicCacheBytes,
+      memoryDfsStackBytes: memory.dfsStackBytes,
+      memoryReachabilitySnapshotBytes: memory.reachabilitySnapshotBytes,
       idaStarIterations: counters.iterations,
     },
   };
@@ -250,13 +392,11 @@ export async function runIdaStarSearch(
   };
   let transpositionSize = 0;
   let collectCurrentMetrics: (() => SolverRunMetrics) | undefined;
-  let heuristicForMetrics: AssignmentHeuristic | undefined;
 
   try {
     throwIfSolverCancelled(context.signal);
     const board = compileSearchBoard(request.board);
     const heuristic = new AssignmentHeuristic(board);
-    heuristicForMetrics = heuristic;
     const reachability = new KeeperReachability(board);
 
     const initialRobot = board.cellAt(
@@ -271,6 +411,58 @@ export async function runIdaStarSearch(
     const initialBoxes = sortedBoxes(
       toDenseBoxes(board, request.snapshot.boxes),
     );
+    const staticMemoryBytes = estimateIdaStaticBytes(
+      board,
+      initialBoxes.length,
+    );
+    let transpositionMemoryBytes = 0;
+    let dfsStackMemoryBytes = 0;
+    let reachabilitySnapshotMemoryBytes = 0;
+    let heuristicCacheEntries = 0;
+    let peakEstimatedMemoryBytes = 0;
+
+    const currentMemory = (): IdaMemoryBreakdown =>
+      estimateIdaMemory(
+        staticMemoryBytes,
+        transpositionMemoryBytes,
+        heuristicCacheEntries,
+        initialBoxes.length,
+        dfsStackMemoryBytes,
+        reachabilitySnapshotMemoryBytes,
+      );
+    const memorySnapshot = (): IdaMemorySnapshot => {
+      const breakdown = currentMemory();
+      peakEstimatedMemoryBytes = Math.max(
+        peakEstimatedMemoryBytes,
+        breakdown.currentBytes,
+      );
+      return Object.freeze({
+        ...breakdown,
+        peakBytes: peakEstimatedMemoryBytes,
+      });
+    };
+    const recordCurrentMemory = (): number => {
+      const currentBytes = estimateIdaCurrentBytes(
+        staticMemoryBytes,
+        transpositionMemoryBytes,
+        estimateHeuristicCacheBytes(
+          heuristicCacheEntries,
+          initialBoxes.length,
+        ),
+        dfsStackMemoryBytes,
+        reachabilitySnapshotMemoryBytes,
+      );
+      peakEstimatedMemoryBytes = Math.max(
+        peakEstimatedMemoryBytes,
+        currentBytes,
+      );
+      return currentBytes;
+    };
+    const memoryLimitReached = () => {
+      const currentBytes = recordCurrentMemory();
+      const maximum = request.limits?.maxMemoryBytes;
+      return maximum !== undefined && currentBytes > maximum;
+    };
 
     const metrics = () =>
       createMetrics(
@@ -279,6 +471,7 @@ export async function runIdaStarSearch(
         counters,
         transpositionSize,
         heuristic,
+        memorySnapshot(),
       );
     collectCurrentMetrics = metrics;
 
@@ -296,6 +489,15 @@ export async function runIdaStarSearch(
 
     report("preparing", "Preparing IDA* push search");
     throwIfSolverCancelled(context.signal);
+
+    if (memoryLimitReached()) {
+      return {
+        status: "unsolved",
+        reason: "limit-reached",
+        detail: "Estimated solver memory limit reached during preparation.",
+        metrics: metrics(),
+      };
+    }
 
     // Already solved?
     if (isSolved(board, initialBoxes)) {
@@ -320,6 +522,15 @@ export async function runIdaStarSearch(
 
     // Initial heuristic
     const initialH = heuristic.evaluate(initialBoxes);
+    heuristicCacheEntries = heuristic.stats.cacheEntries;
+    if (memoryLimitReached()) {
+      return {
+        status: "unsolved",
+        reason: "limit-reached",
+        detail: "Estimated solver memory limit reached during preparation.",
+        metrics: metrics(),
+      };
+    }
     if (!Number.isFinite(initialH)) {
       counters.infeasiblePrunes += 1;
       return {
@@ -345,12 +556,6 @@ export async function runIdaStarSearch(
       );
     };
 
-    const memoryLimitReached = () => {
-      const maximum = request.limits?.maxMemoryBytes;
-      if (maximum === undefined) return false;
-      return transpositionSize * 128 > maximum;
-    };
-
     // -------------------------------------------------------------------
     // IDA* main loop
     // -------------------------------------------------------------------
@@ -363,6 +568,27 @@ export async function runIdaStarSearch(
 
       const transposition = new Map<string, number>();
       transpositionSize = 0;
+      transpositionMemoryBytes = IDA_TRANSPOSITION_BASE_BYTES;
+
+      // Path stack: current DFS path from root to active node.
+      const pathStack: StackFrame[] = [];
+      dfsStackMemoryBytes = IDA_DFS_STACK_BASE_BYTES;
+      reachabilitySnapshotMemoryBytes = 0;
+
+      const pushFrame = (frame: StackFrame) => {
+        pathStack.push(frame);
+        dfsStackMemoryBytes += frame.estimatedStackBytes;
+        reachabilitySnapshotMemoryBytes +=
+          frame.estimatedReachabilityBytes;
+      };
+      const popFrame = (): StackFrame | undefined => {
+        const frame = pathStack.pop();
+        if (!frame) return undefined;
+        dfsStackMemoryBytes -= frame.estimatedStackBytes;
+        reachabilitySnapshotMemoryBytes -=
+          frame.estimatedReachabilityBytes;
+        return frame;
+      };
 
       report(
         "searching",
@@ -374,9 +600,6 @@ export async function runIdaStarSearch(
         limitDetail = "Maximum elapsed time reached.";
         break;
       }
-
-      // Path stack: current DFS path from root to active node.
-      const pathStack: StackFrame[] = [];
 
       const rootFrame: StackFrame = {
         robot: initialRobot,
@@ -390,8 +613,14 @@ export async function runIdaStarSearch(
         expanded: false,
         reachabilitySnapshot: null,
         cachedReachable: null,
+        estimatedStackBytes: estimateStackFrameBytes(
+          initialBoxes,
+          initialBoxSignature,
+          false,
+        ),
+        estimatedReachabilityBytes: 0,
       };
-      pathStack.push(rootFrame);
+      pushFrame(rootFrame);
 
       let lastProgressAt = context.now();
       let lastYieldAt = lastProgressAt;
@@ -437,16 +666,21 @@ export async function runIdaStarSearch(
         // ----- First visit: f-bound, TT, solved check, mark expanded -----
         if (!frame.expanded) {
           const h = heuristic.evaluate(frame.boxes);
+          heuristicCacheEntries = heuristic.stats.cacheEntries;
+          if (memoryLimitReached()) {
+            limitDetail = "Estimated solver memory limit reached.";
+            break idaLoop;
+          }
           if (!Number.isFinite(h)) {
             counters.infeasiblePrunes += 1;
-            pathStack.pop();
+            popFrame();
             continue;
           }
 
           const f = frame.g + h;
           if (f > fLimit) {
             nextLimit = Math.min(nextLimit, f);
-            pathStack.pop();
+            popFrame();
             continue;
           }
 
@@ -455,11 +689,18 @@ export async function runIdaStarSearch(
           const previousG = transposition.get(key);
           if (previousG !== undefined && previousG <= frame.g) {
             counters.duplicates += 1;
-            pathStack.pop();
+            popFrame();
             continue;
           }
           transposition.set(key, frame.g);
-          if (previousG === undefined) transpositionSize += 1;
+          if (previousG === undefined) {
+            transpositionSize += 1;
+            transpositionMemoryBytes += estimateTranspositionEntryBytes(key);
+          }
+          if (memoryLimitReached()) {
+            limitDetail = "Estimated solver memory limit reached.";
+            break idaLoop;
+          }
 
           // Solved?
           if (isSolved(board, frame.boxes)) {
@@ -521,11 +762,21 @@ export async function runIdaStarSearch(
 
           // Compute frozen boxes (stable, does not depend on reachability workspace)
           fillDeadlockOccupancy(deadlockOccupancyBuffer, frame.boxes);
-          frame.frozenBoxes = identifyFrozenBoxes(
+          const frozenBoxes = identifyFrozenBoxes(
             board,
             frame.boxes,
             deadlockOccupancyBuffer,
           );
+          frame.frozenBoxes = frozenBoxes;
+          const frozenBoxesBytes = estimateFrozenBoxesBytes(
+            frozenBoxes.length,
+          );
+          frame.estimatedStackBytes += frozenBoxesBytes;
+          dfsStackMemoryBytes += frozenBoxesBytes;
+          if (memoryLimitReached()) {
+            limitDetail = "Estimated solver memory limit reached.";
+            break idaLoop;
+          }
 
           frame.expanded = true;
           frame.childCursor = 0;
@@ -544,6 +795,15 @@ export async function runIdaStarSearch(
           counters.reachabilityFloods += 1;
           frame.reachabilitySnapshot = reachability.saveState();
           frame.cachedReachable = reachable;
+          const snapshotBytes = estimateReachabilitySnapshotBytes(
+            board.cellCount,
+          );
+          frame.estimatedReachabilityBytes += snapshotBytes;
+          reachabilitySnapshotMemoryBytes += snapshotBytes;
+          if (memoryLimitReached()) {
+            limitDetail = "Estimated solver memory limit reached.";
+            break idaLoop;
+          }
         }
 
         const frozenBoxes = frame.frozenBoxes!;
@@ -644,16 +904,26 @@ export async function runIdaStarSearch(
             expanded: false,
             reachabilitySnapshot: null,
             cachedReachable: null,
+            estimatedStackBytes: estimateStackFrameBytes(
+              newBoxes,
+              newBoxSignature,
+              true,
+            ),
+            estimatedReachabilityBytes: 0,
           };
 
-          pathStack.push(childFrame);
+          pushFrame(childFrame);
+          if (memoryLimitReached()) {
+            limitDetail = "Estimated solver memory limit reached.";
+            break idaLoop;
+          }
           foundChild = true;
           break; // Process child before continuing with siblings
         }
 
         // No more children: backtrack
         if (!foundChild) {
-          pathStack.pop();
+          popFrame();
         }
       }
 
@@ -686,20 +956,37 @@ export async function runIdaStarSearch(
     };
   } catch (error) {
     if (isSolverCancellation(error) || context.signal.aborted) {
-      const fallbackHeuristic =
-        heuristicForMetrics ??
-        new AssignmentHeuristic(compileSearchBoard(request.board));
+      let cancellationMetrics = collectCurrentMetrics?.();
+      if (!cancellationMetrics) {
+        const fallbackBoard = compileSearchBoard(request.board);
+        const fallbackHeuristic = new AssignmentHeuristic(fallbackBoard);
+        const fallbackStaticBytes = estimateIdaStaticBytes(
+          fallbackBoard,
+          request.snapshot.boxes.length,
+        );
+        const fallbackBreakdown = estimateIdaMemory(
+          fallbackStaticBytes,
+          0,
+          0,
+          request.snapshot.boxes.length,
+          0,
+          0,
+        );
+        cancellationMetrics = createMetrics(
+          context,
+          startedAt,
+          counters,
+          transpositionSize,
+          fallbackHeuristic,
+          Object.freeze({
+            ...fallbackBreakdown,
+            peakBytes: fallbackBreakdown.currentBytes,
+          }),
+        );
+      }
       return {
         status: "cancelled",
-        metrics:
-          collectCurrentMetrics?.() ??
-          createMetrics(
-            context,
-            startedAt,
-            counters,
-            transpositionSize,
-            fallbackHeuristic,
-          ),
+        metrics: cancellationMetrics,
       };
     }
     throw error;

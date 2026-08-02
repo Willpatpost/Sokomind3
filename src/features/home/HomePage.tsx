@@ -30,18 +30,16 @@ export function HomePage() {
 
   const continueTarget = useMemo(() => {
     const restored = loadSession(getPuzzleById);
-    return restored?.session.puzzle.id ?? PUZZLES[0].id;
+    return restored?.session.puzzle.id;
   }, []);
 
   const nextUnsolved = useMemo(() => {
     const completed = new Set(Object.keys(progress.completed));
-    return PUZZLES.find((p) => !completed.has(p.id))?.id ?? PUZZLES[0].id;
+    return PUZZLES.find((p) => !completed.has(p.id))?.id;
   }, [progress]);
 
-  const continueId = continueTarget ?? nextUnsolved;
-  const pct = stats.totalPuzzles > 0
-    ? (stats.totalSolved / stats.totalPuzzles) * 100
-    : 0;
+  const continueId = continueTarget ?? nextUnsolved ?? PUZZLES[0].id;
+  const pct = stats.completionPercentage;
 
   return (
     <main className={styles.page}>

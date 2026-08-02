@@ -10,6 +10,7 @@ import {
 import type {
   SolverExecutionContext,
   SolverObjective,
+  SolverProgress,
   SolverRequest,
   SolverResult,
 } from "../../src/solver/contracts.ts";
@@ -163,6 +164,11 @@ describe("IDA* search", () => {
     );
 
     assert.equal(result.status, "cancelled");
+    assert.ok((result.metrics.counters?.estimatedMemoryBytes ?? 0) > 0);
+    assert.equal(
+      result.metrics.counters?.estimatedMemoryBytes,
+      result.metrics.counters?.peakEstimatedMemoryBytes,
+    );
   });
 
   it("respects maxElapsedMs limit", async () => {
@@ -216,6 +222,108 @@ describe("IDA* search", () => {
     assert.ok(
       (result.metrics.counters?.idaStarIterations ?? 0) >= 1,
       "Expected at least 1 IDA* iteration",
+    );
+    assert.ok(
+      (result.metrics.counters?.estimatedMemoryBytes ?? 0) > 0,
+      "Expected a non-zero live memory estimate",
+    );
+    assert.equal(
+      result.metrics.counters?.estimatedMemoryBytes,
+      result.metrics.counters?.currentEstimatedMemoryBytes,
+    );
+    assert.ok(
+      (result.metrics.counters?.peakEstimatedMemoryBytes ?? 0) >=
+        (result.metrics.counters?.estimatedMemoryBytes ?? Infinity),
+      "Expected peak memory to include current memory",
+    );
+  });
+
+  it("rejects a budget below static allocation before search", async () => {
+    const session = createSession(ONE_BOX);
+    const pushed = stepSnapshot(session.board, session.snapshot, "up");
+    assert.equal(pushed.snapshot.solved, true);
+
+    const solvedRequest: SolverRequest = {
+      board: session.board,
+      snapshot: pushed.snapshot,
+      objective: { kind: "moves" },
+    };
+    const baseline = solved(
+      await runIdaStarSearch(solvedRequest, executionContext()),
+    );
+    const staticBytes =
+      baseline.metrics.counters?.memoryStaticBytes ?? 0;
+    assert.ok(staticBytes > 1, "Expected a meaningful static allocation");
+    assert.equal(
+      baseline.metrics.counters?.estimatedMemoryBytes,
+      staticBytes,
+    );
+
+    const result = await runIdaStarSearch(
+      {
+        ...solvedRequest,
+        limits: { maxMemoryBytes: staticBytes - 1 },
+      },
+      executionContext(),
+    );
+
+    assert.equal(result.status, "unsolved");
+    if (result.status !== "unsolved") return;
+    assert.equal(result.reason, "limit-reached");
+    assert.match(result.detail ?? "", /memory.*preparation/i);
+    assert.equal(result.metrics.expandedStates, 0);
+    assert.equal(result.metrics.generatedStates, 0);
+    assert.equal(result.metrics.counters?.estimatedMemoryBytes, staticBytes);
+    assert.equal(result.metrics.counters?.peakEstimatedMemoryBytes, staticBytes);
+  });
+
+  it("tracks monotonic peak memory and enforces the limit during growth", async () => {
+    const request = requestFor(TWO_GENERIC_BOXES, { kind: "moves" });
+    const progress: SolverProgress[] = [];
+    const baseline = solved(
+      await runIdaStarSearch(
+        request,
+        executionContext((update) => progress.push(update)),
+      ),
+    );
+
+    const peaks = progress.map(
+      (update) => update.counters?.peakEstimatedMemoryBytes ?? 0,
+    );
+    assert.ok(peaks.length >= 2);
+    for (let index = 1; index < peaks.length; index += 1) {
+      assert.ok(peaks[index] >= peaks[index - 1], "Peak memory regressed");
+    }
+
+    const counters = baseline.metrics.counters;
+    const staticBytes = progress[0]?.counters?.memoryStaticBytes ?? 0;
+    const currentBytes = counters?.estimatedMemoryBytes ?? 0;
+    const peakBytes = counters?.peakEstimatedMemoryBytes ?? 0;
+    assert.ok(staticBytes > 0);
+    assert.ok(peakBytes > staticBytes);
+    assert.ok(peakBytes >= currentBytes);
+    assert.equal(
+      currentBytes,
+      (counters?.memoryStaticBytes ?? 0) +
+        (counters?.memoryTranspositionBytes ?? 0) +
+        (counters?.memoryHeuristicCacheBytes ?? 0) +
+        (counters?.memoryDfsStackBytes ?? 0) +
+        (counters?.memoryReachabilitySnapshotBytes ?? 0),
+    );
+
+    const growthBudget =
+      staticBytes + Math.floor((peakBytes - staticBytes) / 2);
+    assert.ok(growthBudget >= staticBytes && growthBudget < peakBytes);
+    const limited = await runIdaStarSearch(
+      { ...request, limits: { maxMemoryBytes: growthBudget } },
+      executionContext(),
+    );
+    assert.equal(limited.status, "unsolved");
+    if (limited.status !== "unsolved") return;
+    assert.equal(limited.reason, "limit-reached");
+    assert.match(limited.detail ?? "", /memory/i);
+    assert.ok(
+      (limited.metrics.counters?.peakEstimatedMemoryBytes ?? 0) > growthBudget,
     );
   });
 

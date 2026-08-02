@@ -56,7 +56,8 @@ npm run benchmark:solver -- --puzzle=huge
 `npm test` runs domain and preference tests, creates the production build, and
 then verifies that every emitted script, stylesheet, and public asset is safe
 to deploy beneath a GitHub project-page path. `npm run test:browser` adds
-Playwright interaction tests and axe accessibility scans at `/Sokomind/`.
+Playwright interaction tests and axe accessibility scans at `/Sokomind/` by
+default. Set `SOKOMIND_PREVIEW_BASE_PATH` to verify any other project path.
 The intentionally separate `test:solver:huge` guardrail replay-solves Grand
 Hall in base, mirrored, and rotated orientations and checks the reviewed
 move-count rewrite. `benchmark:solver` emits JSON Lines for the isolated
@@ -71,7 +72,9 @@ screen, choose **GitHub Actions** as the publishing source once. No generated
 build files need to be committed.
 
 Vite uses `base: "./"`, so the same output works at `/Sokomind/`, on a custom
-domain, and through a local static server. See
+domain, and through a local static server. The workflow derives temporary
+Pages metadata from the repository and accepts a `PUBLIC_SITE_URL` repository
+variable for the final canonical domain. See
 [docs/deployment.md](docs/deployment.md) for the complete deployment contract.
 
 ## Project structure
@@ -127,10 +130,12 @@ history, so long routes do not copy every earlier snapshot per move.
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Active codebase audit tracker](AUDIT-TRACKER.md)
 - [Experience, sound, and motion](docs/experience.md)
 - [GitHub Pages deployment](docs/deployment.md)
 - [Solver integration](docs/solver-integration.md)
-- [Deferred follow-up audit](docs/sokomind-follow-up-audit.md)
+- [Historical solver follow-up audit](docs/sokomind-follow-up-audit.md)
+- [Reserved final audit items](REMAINING-AUDIT-ITEMS.md)
 - [Puzzle format](docs/puzzle-format.md)
 - [Testing strategy](docs/testing.md)
 - [Persistence and sharing](docs/persistence-and-sharing.md)

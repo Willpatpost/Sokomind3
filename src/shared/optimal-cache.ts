@@ -3,7 +3,9 @@ import {
   STORAGE_KEYS,
   readStoredValue,
   writeStoredValue,
+  type StorageMutationResult,
 } from "./storage.ts";
+import { trackPersistenceResult } from "./persistence-health.ts";
 
 export interface OptimalRecord {
   readonly moves: number;
@@ -88,8 +90,10 @@ export function loadOptimalCache(): OptimalCache {
   return EMPTY_CACHE;
 }
 
-export function saveOptimalCache(cache: OptimalCache): void {
-  writeStoredValue(STORAGE_KEYS.optimal, JSON.stringify(cache));
+export function saveOptimalCache(cache: OptimalCache): StorageMutationResult {
+  return trackPersistenceResult(
+    writeStoredValue(STORAGE_KEYS.optimal, JSON.stringify(cache)),
+  );
 }
 
 export function setOptimalRecord(

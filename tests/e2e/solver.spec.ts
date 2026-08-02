@@ -14,6 +14,59 @@ async function openSolver(page: Page) {
   return dialog;
 }
 
+test("defers lazy dialogs and disposes the solver worker", async ({
+  page,
+}) => {
+  await page.goto("about:blank");
+
+  const solverDialogAsset = /\/SolverDialog-[^/]+\.(?:css|js)$/u;
+  const progressDialogAsset = /\/ProgressDialog-[^/]+\.(?:css|js)$/u;
+  const solverWorkerAsset = /\/solver\.worker-[^/]+\.js$/u;
+  const requestedAssets: string[] = [];
+  const startedWorkers: string[] = [];
+  page.on("request", (request) => {
+    requestedAssets.push(new URL(request.url()).pathname);
+  });
+  page.on("worker", (worker) => {
+    startedWorkers.push(new URL(worker.url()).pathname);
+  });
+
+  await page.goto("./#/play/ultra-tiny");
+  await expect(page.getByRole("heading", { name: "First Steps" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
+  expect(requestedAssets.some((path) => solverDialogAsset.test(path))).toBe(false);
+  expect(requestedAssets.some((path) => progressDialogAsset.test(path))).toBe(false);
+  expect(startedWorkers.some((path) => solverWorkerAsset.test(path))).toBe(false);
+
+  let dialog = await openSolver(page);
+  expect(requestedAssets.some((path) => solverDialogAsset.test(path))).toBe(true);
+  await expect
+    .poll(() => startedWorkers.filter((path) => solverWorkerAsset.test(path)).length)
+    .toBe(1);
+  await dialog.getByLabel("Algorithm").selectOption("classic-astar");
+  await dialog.getByLabel("Time limit").selectOption("120000");
+  await dialog.getByRole("button", { name: "Close solver" }).click();
+  await expect(dialog).toBeHidden();
+  await expect
+    .poll(
+      () =>
+        page
+          .workers()
+          .filter((worker) =>
+            solverWorkerAsset.test(new URL(worker.url()).pathname),
+          ).length,
+    )
+    .toBe(0);
+
+  dialog = await openSolver(page);
+  await expect(dialog.getByLabel("Algorithm")).toHaveValue("sokomind-solver");
+  await expect(dialog.getByLabel("Time limit")).toHaveValue("60000");
+  await expect
+    .poll(() => startedWorkers.filter((path) => solverWorkerAsset.test(path)).length)
+    .toBe(2);
+});
+
 test("discovers five move-search algorithms and exposes an accessible configuration", async ({
   page,
 }) => {

@@ -54,7 +54,9 @@ export const GameSidebar = memo(function GameSidebar({
           <span>{puzzle.boxes} {puzzle.boxes === 1 ? "box" : "boxes"}</span>
         </div>
         {elapsed > 0 ? (
-          <div className={styles.timer}>{formatTime(elapsed)}</div>
+          <div className={styles.timer} data-testid="elapsed-time">
+            {formatTime(elapsed)}
+          </div>
         ) : null}
         <div className={styles.stats}>
           <div className={styles.stat}>

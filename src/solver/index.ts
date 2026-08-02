@@ -1,4 +1,5 @@
 export * from "./cancellation.ts";
+export * from "./compatibility.ts";
 export * from "./contracts.ts";
 export * from "./protocol.ts";
 export * from "./registry.ts";

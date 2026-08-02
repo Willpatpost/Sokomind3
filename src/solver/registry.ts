@@ -1,6 +1,5 @@
 import type { SolverAdapter, SolverMetadata } from "./contracts.ts";
-
-const SOLVER_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+import { assertValidSolverMetadata } from "./validation.ts";
 
 export class DuplicateSolverError extends Error {
   readonly solverId: string;
@@ -23,9 +22,10 @@ export class SolverNotFoundError extends Error {
 }
 
 export class InvalidSolverAdapterError extends TypeError {
-  constructor(message: string) {
+  constructor(message: string, cause?: unknown) {
     super(message);
     this.name = "InvalidSolverAdapterError";
+    if (cause !== undefined) this.cause = cause;
   }
 }
 
@@ -37,68 +37,46 @@ export interface SolverRegistration {
   unregister(): boolean;
 }
 
-function assertNonEmpty(
-  value: unknown,
-  field: string,
-): asserts value is string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new InvalidSolverAdapterError(
-      `Solver metadata "${field}" must not be empty.`,
-    );
-  }
-}
-
-export function assertValidSolverAdapter(
-  adapter: SolverAdapter,
-): asserts adapter is SolverAdapter {
+function validatedSolverMetadata(adapter: SolverAdapter): SolverMetadata {
   if (!adapter || typeof adapter !== "object") {
     throw new InvalidSolverAdapterError("Solver adapter must be an object.");
   }
-  if (typeof adapter.solve !== "function") {
+
+  let solve: unknown;
+  let metadata: unknown;
+  try {
+    solve = adapter.solve;
+    metadata = adapter.metadata;
+  } catch (error) {
+    throw new InvalidSolverAdapterError(
+      "Solver adapter properties could not be read.",
+      error,
+    );
+  }
+
+  if (typeof solve !== "function") {
     throw new InvalidSolverAdapterError(
       "Solver adapter must provide a solve function.",
     );
   }
 
-  const metadata = adapter.metadata;
-  if (!metadata || typeof metadata !== "object") {
+  try {
+    assertValidSolverMetadata(metadata);
+  } catch (error) {
     throw new InvalidSolverAdapterError(
-      "Solver adapter must provide metadata.",
+      error instanceof Error
+        ? error.message
+        : "Solver adapter metadata is invalid.",
+      error,
     );
   }
+  return metadata;
+}
 
-  assertNonEmpty(metadata.id, "id");
-  if (!SOLVER_ID_PATTERN.test(metadata.id)) {
-    throw new InvalidSolverAdapterError(
-      `Solver id "${metadata.id}" must be lowercase and URL-safe.`,
-    );
-  }
-  assertNonEmpty(metadata.displayName, "displayName");
-  assertNonEmpty(metadata.description, "description");
-  assertNonEmpty(metadata.version, "version");
-
-  const capabilities = metadata.capabilities;
-  if (!capabilities || typeof capabilities !== "object") {
-    throw new InvalidSolverAdapterError(
-      "Solver metadata must declare capabilities.",
-    );
-  }
-  if (
-    !Array.isArray(capabilities.executionTargets) ||
-    capabilities.executionTargets.length === 0
-  ) {
-    throw new InvalidSolverAdapterError(
-      "Solver must support at least one execution target.",
-    );
-  }
-  if (
-    !Array.isArray(capabilities.objectives) ||
-    capabilities.objectives.length === 0
-  ) {
-    throw new InvalidSolverAdapterError(
-      "Solver must support at least one objective.",
-    );
-  }
+export function assertValidSolverAdapter(
+  adapter: SolverAdapter,
+): asserts adapter is SolverAdapter {
+  void validatedSolverMetadata(adapter);
 }
 
 /**
@@ -117,8 +95,7 @@ export class SolverRegistry {
   }
 
   register(adapter: SolverAdapter): SolverRegistration {
-    assertValidSolverAdapter(adapter);
-    const { id } = adapter.metadata;
+    const { id } = validatedSolverMetadata(adapter);
     if (this.#adapters.has(id)) throw new DuplicateSolverError(id);
 
     this.#adapters.set(id, adapter);
@@ -151,13 +128,30 @@ export class SolverRegistry {
     return adapter;
   }
 
+  requireMetadata(solverId: string): SolverMetadata {
+    const metadata = validatedSolverMetadata(this.require(solverId));
+    if (metadata.id !== solverId) {
+      throw new InvalidSolverAdapterError(
+        `Registered solver "${solverId}" now declares id "${metadata.id}".`,
+      );
+    }
+    return metadata;
+  }
+
   list(): readonly SolverAdapter[] {
     return Object.freeze([...this.#adapters.values()]);
   }
 
   listMetadata(): readonly SolverMetadata[] {
-    return Object.freeze(
-      [...this.#adapters.values()].map((adapter) => adapter.metadata),
-    );
+    const metadata: SolverMetadata[] = [];
+    for (const [registeredId, adapter] of this.#adapters) {
+      try {
+        const candidate = validatedSolverMetadata(adapter);
+        if (candidate.id === registeredId) metadata.push(candidate);
+      } catch {
+        // Discovery isolates a corrupt adapter instead of hiding healthy ones.
+      }
+    }
+    return Object.freeze(metadata);
   }
 }

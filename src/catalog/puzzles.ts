@@ -280,7 +280,12 @@ export const PUZZLES: readonly PuzzleDefinition[] = [
 export type PuzzleId = string;
 
 const puzzleById: Record<string, PuzzleDefinition> = {};
-for (const puzzle of PUZZLES) puzzleById[puzzle.id] = puzzle;
+const puzzleIndexById = new Map<string, number>();
+for (let index = 0; index < PUZZLES.length; index += 1) {
+  const puzzle = PUZZLES[index];
+  puzzleById[puzzle.id] = puzzle;
+  puzzleIndexById.set(puzzle.id, index);
+}
 
 export const PUZZLE_BY_ID: Readonly<Record<string, PuzzleDefinition>> =
   Object.freeze(puzzleById);
@@ -301,6 +306,10 @@ export function getPuzzleById(id: string): PuzzleDefinition | undefined {
   return Object.prototype.hasOwnProperty.call(PUZZLE_BY_ID, id)
     ? PUZZLE_BY_ID[id]
     : undefined;
+}
+
+export function getPuzzleIndexById(id: string): number {
+  return puzzleIndexById.get(id) ?? -1;
 }
 
 export function getPuzzlesByDifficulty(

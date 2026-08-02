@@ -111,4 +111,74 @@ describe("SolverRegistry", () => {
     );
     assert.equal(registry.size, 0);
   });
+
+  it("rejects invalid capability enums and missing boolean flags", () => {
+    const booleanFlags = [
+      "labeledBoxes",
+      "genericBoxes",
+      "partialState",
+      "reportsProgress",
+      "cooperativeCancellation",
+      "deterministic",
+    ] as const;
+    const invalidCapabilities: Array<Record<string, unknown>> = [
+      { ...capabilities, executionTargets: ["gpu"] },
+      { ...capabilities, runtime: "native" },
+      { ...capabilities, objectives: ["pushes"] },
+      { ...capabilities, quality: "approximate" },
+      ...booleanFlags.map((flag) => {
+        const missing = { ...capabilities } as Record<string, unknown>;
+        delete missing[flag];
+        return missing;
+      }),
+    ];
+
+    for (const [index, candidate] of invalidCapabilities.entries()) {
+      const invalid = {
+        ...makeAdapter(`invalid-${index}`),
+        metadata: {
+          ...makeAdapter(`invalid-${index}`).metadata,
+          capabilities: candidate,
+        },
+      } as unknown as SolverAdapter;
+      assert.throws(
+        () => new SolverRegistry([invalid]),
+        InvalidSolverAdapterError,
+      );
+    }
+  });
+
+  it("isolates an adapter that becomes invalid during discovery", () => {
+    const healthy = makeAdapter("healthy");
+    const stableMetadata = makeAdapter("unstable").metadata;
+    let valid = true;
+    const unstable = {
+      get metadata() {
+        if (valid) return stableMetadata;
+        return {
+          ...stableMetadata,
+          capabilities: {
+            ...stableMetadata.capabilities,
+            runtime: "native",
+          },
+        } as unknown as typeof stableMetadata;
+      },
+      async solve() {
+        return {
+          status: "unsolved" as const,
+          reason: "exhausted" as const,
+          metrics: { elapsedMs: 0 },
+        };
+      },
+    } satisfies SolverAdapter;
+    const registry = new SolverRegistry([healthy, unstable]);
+
+    valid = false;
+
+    assert.deepEqual(
+      registry.listMetadata().map(({ id }) => id),
+      ["healthy"],
+    );
+    assert.equal(registry.size, 2);
+  });
 });

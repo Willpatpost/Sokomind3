@@ -2,7 +2,6 @@ import {
   LEGACY_STORAGE_KEYS,
   STORAGE_KEYS,
   readStoredValue,
-  writeStoredValue,
 } from "./storage.ts";
 
 export interface PuzzleRecord {
@@ -14,6 +13,11 @@ export interface PuzzleRecord {
 export interface ProgressData {
   readonly version: 1;
   readonly completed: Readonly<Record<string, PuzzleRecord>>;
+}
+
+export interface NormalizedProgress {
+  readonly progress: ProgressData;
+  readonly ignoredPuzzleIds: readonly string[];
 }
 
 export const EMPTY_PROGRESS: ProgressData = Object.freeze({
@@ -31,12 +35,17 @@ function isBetterRecord(
 function isPuzzleRecord(value: unknown): value is PuzzleRecord {
   if (!value || typeof value !== "object") return false;
   const record = value as Partial<PuzzleRecord>;
+  const completedAt = typeof record.completedAt === "string"
+    ? Date.parse(record.completedAt)
+    : Number.NaN;
   return (
-    Number.isInteger(record.moves) &&
+    Number.isSafeInteger(record.moves) &&
     Number(record.moves) >= 0 &&
-    Number.isInteger(record.pushes) &&
+    Number.isSafeInteger(record.pushes) &&
     Number(record.pushes) >= 0 &&
-    typeof record.completedAt === "string"
+    Number(record.pushes) <= Number(record.moves) &&
+    Number.isFinite(completedAt) &&
+    new Date(completedAt).toISOString() === record.completedAt
   );
 }
 
@@ -48,7 +57,11 @@ export function tryParseProgress(value: string | null): ProgressData | null {
       version?: unknown;
       completed?: unknown;
     };
-    if (parsed.version !== 1 || !parsed.completed || typeof parsed.completed !== "object") {
+    if (
+      (parsed.version !== 1 && parsed.version !== 2) ||
+      !parsed.completed ||
+      typeof parsed.completed !== "object"
+    ) {
       return null;
     }
 
@@ -73,8 +86,32 @@ export function loadProgress(): ProgressData {
   );
 }
 
-export function saveProgress(progress: ProgressData): void {
-  writeStoredValue(STORAGE_KEYS.progress, JSON.stringify(progress));
+/**
+ * Keep only records belonging to the active catalog while reporting every
+ * stale id to the import surface that can explain what was ignored.
+ */
+export function normalizeProgress(
+  progress: ProgressData,
+  knownPuzzleIds: Iterable<string>,
+): NormalizedProgress {
+  const knownIds = new Set(knownPuzzleIds);
+  const completed: Record<string, PuzzleRecord> = {};
+  const ignoredPuzzleIds: string[] = [];
+
+  for (const [puzzleId, record] of Object.entries(progress.completed)) {
+    if (knownIds.has(puzzleId)) {
+      completed[puzzleId] = record;
+    } else {
+      ignoredPuzzleIds.push(puzzleId);
+    }
+  }
+
+  return {
+    progress: ignoredPuzzleIds.length > 0
+      ? { version: 1, completed }
+      : progress,
+    ignoredPuzzleIds: Object.freeze(ignoredPuzzleIds),
+  };
 }
 
 export function recordCompletion(

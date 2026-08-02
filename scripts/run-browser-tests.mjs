@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { PREVIEW_URL } from "./preview-settings.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const PREVIEW_SCRIPT = fileURLToPath(
@@ -8,8 +9,6 @@ const PREVIEW_SCRIPT = fileURLToPath(
 const PLAYWRIGHT_CLI = fileURLToPath(
   new URL("../node_modules/@playwright/test/cli.js", import.meta.url),
 );
-const PREVIEW_URL = "http://127.0.0.1:4173/Sokomind/";
-
 let previewAlreadyRunning = false;
 try {
   await fetch(PREVIEW_URL, {

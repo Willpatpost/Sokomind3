@@ -3,7 +3,9 @@ import {
   STORAGE_KEYS,
   readStoredValue,
   writeStoredValue,
+  type StorageMutationResult,
 } from "../../shared/storage.ts";
+import { trackPersistenceResult } from "../../shared/persistence-health.ts";
 
 export const EXPERIENCE_PREFERENCES_VERSION = 1 as const;
 export const EXPERIENCE_PREFERENCES_STORAGE_KEY = STORAGE_KEYS.experience;
@@ -151,9 +153,11 @@ export function loadExperiencePreferences(): ExperiencePreferences {
 
 export function saveExperiencePreferences(
   preferences: ExperiencePreferences,
-): void {
-  writeStoredValue(
-    EXPERIENCE_PREFERENCES_STORAGE_KEY,
-    JSON.stringify(preferences),
+): StorageMutationResult {
+  return trackPersistenceResult(
+    writeStoredValue(
+      EXPERIENCE_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(preferences),
+    ),
   );
 }

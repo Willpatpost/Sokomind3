@@ -194,6 +194,8 @@ export function useSolverController({
   );
 
   useEffect(() => {
+    if (!open) return;
+
     let active = true;
     let failed = false;
     let startupTimer = 0;
@@ -289,7 +291,7 @@ export function useSolverController({
         if (clientRef.current === client) clientRef.current = null;
       };
     }
-  }, [appendLog, workerGeneration]);
+  }, [appendLog, open, workerGeneration]);
 
   const cancel = useCallback((reason = "Search cancelled by user") => {
     const run = runRef.current;

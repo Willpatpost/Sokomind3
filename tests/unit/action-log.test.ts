@@ -113,6 +113,51 @@ test("rejects a syntactically valid replay as soon as an action is blocked", () 
   );
 });
 
+test("a solved session rejects an otherwise legal walk and replay trailing walk", () => {
+  const definition = puzzle([
+    "OOOOOO",
+    "ORXS O",
+    "O    O",
+    "OOOOOO",
+  ]);
+  const solved = move(createSession(definition), "right");
+
+  assert.equal(solved.solved, true);
+  assert.equal(solved.actionLog, "R");
+  assert.equal(move(solved, "down"), solved);
+
+  assert.throws(
+    () => replayActionLog(definition, "RD"),
+    (error) => {
+      assert.ok(error instanceof ActionLogError);
+      assert.equal(error.code, "blocked-action");
+      assert.equal(error.index, 1);
+      assert.equal(error.action, "D");
+      return true;
+    },
+  );
+});
+
+test("a solved session rejects pushing a box off its goal and replay trailing push", () => {
+  const definition = puzzle(["OOOOOO", "ORXS O", "OOOOOO"]);
+  const solved = move(createSession(definition), "right");
+
+  assert.equal(solved.solved, true);
+  assert.equal(solved.actionLog, "R");
+  assert.equal(move(solved, "right"), solved);
+
+  assert.throws(
+    () => replayActionLog(definition, "RR"),
+    (error) => {
+      assert.ok(error instanceof ActionLogError);
+      assert.equal(error.code, "blocked-action");
+      assert.equal(error.index, 1);
+      assert.equal(error.action, "R");
+      return true;
+    },
+  );
+});
+
 test("snapshot transitions are exact, immutable, and history-free", () => {
   const session = createSession(
     puzzle([
@@ -140,11 +185,12 @@ test("snapshot transitions are exact, immutable, and history-free", () => {
 
 test("long sessions structurally share undo history and replay exactly", () => {
   const definition = puzzle([
-    "OOOOO",
-    "OR  O",
-    "O   O",
-    "OOOOO",
-  ], 0);
+    "OOOOOO",
+    "OR   O",
+    "O    O",
+    "O X SO",
+    "OOOOOO",
+  ]);
   const cycle = ["right", "down", "left", "up"] as const;
   const actionLog = encodeActionLog(
     Array.from({ length: 500 }, () => cycle).flat(),

@@ -27,6 +27,8 @@ export interface BestEfficiency {
 export interface AggregateStats {
   readonly totalSolved: number;
   readonly totalPuzzles: number;
+  readonly completionPercentage: number;
+  readonly ignoredRecords: number;
   readonly totalMoves: number;
   readonly totalPushes: number;
   readonly averagePushesPerPuzzle: number;
@@ -38,6 +40,7 @@ export function computeStats(
   progress: ProgressData,
   puzzles: readonly PuzzleDefinition[],
 ): AggregateStats {
+  const knownPuzzleIds = new Set(puzzles.map((puzzle) => puzzle.id));
   const tierCounts = new Map<Difficulty, { solved: number; total: number }>();
   for (const difficulty of DIFFICULTY_ORDER) {
     tierCounts.set(difficulty, { solved: 0, total: 0 });
@@ -77,6 +80,12 @@ export function computeStats(
   return {
     totalSolved,
     totalPuzzles: puzzles.length,
+    completionPercentage: puzzles.length > 0
+      ? Math.min(100, (totalSolved / puzzles.length) * 100)
+      : 0,
+    ignoredRecords: Object.keys(progress.completed).filter(
+      (puzzleId) => !knownPuzzleIds.has(puzzleId),
+    ).length,
     totalMoves,
     totalPushes,
     averagePushesPerPuzzle: totalSolved > 0 ? totalPushes / totalSolved : 0,

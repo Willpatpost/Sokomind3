@@ -1,5 +1,6 @@
 import { AmbientBackdrop } from "@/src/features/experience";
 import { RouterProvider } from "@/src/router";
+import { PersistenceWarning } from "@/src/shared/ui/PersistenceWarning";
 import { AppShell } from "./AppShell";
 
 export function App() {
@@ -7,6 +8,7 @@ export function App() {
     <RouterProvider>
       <AmbientBackdrop />
       <AppShell />
+      <PersistenceWarning />
     </RouterProvider>
   );
 }

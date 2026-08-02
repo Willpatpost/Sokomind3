@@ -6,7 +6,7 @@ import {
   type Direction,
 } from "@/src/core";
 import { decodeActionLog } from "@/src/core/action-log";
-import { PUZZLES } from "@/src/catalog/puzzles";
+import { getPuzzleIndexById, PUZZLES } from "@/src/catalog/puzzles";
 import type { ProgressData } from "@/src/shared/progress";
 import {
   loadOptimalCache,
@@ -70,6 +70,7 @@ export function usePlayController(puzzleId: string, actionLog?: string) {
   }, []);
   const {
     session,
+    sessionRestored,
     sessionRef,
     progress,
     commitSession,
@@ -109,7 +110,11 @@ export function usePlayController(puzzleId: string, actionLog?: string) {
     progressOpen ||
     playback.active ||
     session.moves === 0;
-  const timer = useTimer({ paused: timerPaused, persistKey: "sokomind:timer" });
+  const timer = useTimer({
+    paused: timerPaused,
+    persistKey: `sokomind:timer:${session.puzzle.id}`,
+    restorePersisted: sessionRestored,
+  });
   const timerResetRef = useRef(timer.reset);
   useEffect(() => {
     timerResetRef.current = timer.reset;
@@ -231,12 +236,12 @@ export function usePlayController(puzzleId: string, actionLog?: string) {
   }, [navigate, stopSolutionPlayback]);
 
   const selectPreviousPuzzle = useCallback(() => {
-    const currentIndex = PUZZLES.findIndex((p) => p.id === session.puzzle.id);
+    const currentIndex = getPuzzleIndexById(session.puzzle.id);
     if (currentIndex > 0) selectPuzzle(PUZZLES[currentIndex - 1].id);
   }, [session.puzzle.id, selectPuzzle]);
 
   const selectNextPuzzle = useCallback(() => {
-    const currentIndex = PUZZLES.findIndex((p) => p.id === session.puzzle.id);
+    const currentIndex = getPuzzleIndexById(session.puzzle.id);
     if (currentIndex < PUZZLES.length - 1) selectPuzzle(PUZZLES[currentIndex + 1].id);
   }, [session.puzzle.id, selectPuzzle]);
 
@@ -410,7 +415,7 @@ export function usePlayController(puzzleId: string, actionLog?: string) {
     onPreviousPuzzle: selectPreviousPuzzle,
   });
 
-  const puzzleIndex = PUZZLES.findIndex((p) => p.id === session.puzzle.id);
+  const puzzleIndex = getPuzzleIndexById(session.puzzle.id);
   const nextPuzzle = PUZZLES[puzzleIndex + 1];
 
   return {

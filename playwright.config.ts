@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { PREVIEW_URL } from "./scripts/preview-settings.mjs";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -7,7 +8,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:4173/Sokomind/",
+    baseURL: PREVIEW_URL,
     serviceWorkers: "block",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
@@ -15,7 +16,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /mobile\.spec\.ts/,
+      testIgnore: [/mobile\.spec\.ts/, /service-worker\.spec\.ts/],
       use: {
         ...devices["Desktop Chrome"],
         channel: process.env.CI ? undefined : "chrome",
@@ -23,14 +24,14 @@ export default defineConfig({
     },
     {
       name: "firefox",
-      testIgnore: /mobile\.spec\.ts/,
+      testIgnore: [/mobile\.spec\.ts/, /service-worker\.spec\.ts/],
       use: {
         ...devices["Desktop Firefox"],
       },
     },
     {
       name: "webkit",
-      testIgnore: /mobile\.spec\.ts/,
+      testIgnore: [/mobile\.spec\.ts/, /service-worker\.spec\.ts/],
       use: {
         ...devices["Desktop Safari"],
       },
@@ -47,6 +48,15 @@ export default defineConfig({
       testMatch: /mobile\.spec\.ts/,
       use: {
         ...devices["iPhone 14"],
+      },
+    },
+    {
+      name: "service-worker-chromium",
+      testMatch: /service-worker\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: process.env.CI ? undefined : "chrome",
+        serviceWorkers: "allow",
       },
     },
   ],

@@ -3,10 +3,10 @@ import {
   isSolverCancellation,
   type SolverCancellationController,
 } from "./cancellation.ts";
+import { assertSolverRequestCompatible } from "./compatibility.ts";
 import type {
   SolverAdapter,
   SolverProgress,
-  SolverRequest,
   SolverResult,
 } from "./contracts.ts";
 import {
@@ -18,7 +18,6 @@ import {
 } from "./protocol.ts";
 import { SolverRegistry } from "./registry.ts";
 import {
-  assertValidSolverMetadata,
   assertValidSolverProgress,
   assertValidSolverResult,
 } from "./validation.ts";
@@ -67,10 +66,6 @@ function inferJobId(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const jobId = (value as { jobId?: unknown }).jobId;
   return typeof jobId === "string" && jobId.trim() ? jobId : undefined;
-}
-
-function objectiveKind(request: SolverRequest) {
-  return request.objective.kind;
 }
 
 /**
@@ -175,7 +170,6 @@ export class SolverWorkerHost {
   #discover(): void {
     try {
       const solvers = this.#registry.listMetadata();
-      for (const metadata of solvers) assertValidSolverMetadata(metadata);
       this.#post({
         protocolVersion: SOLVER_WORKER_PROTOCOL_VERSION,
         type: "solver/ready",
@@ -219,22 +213,8 @@ export class SolverWorkerHost {
     let adapter: SolverAdapter;
     try {
       adapter = this.#registry.require(command.solverId);
-      if (!adapter.metadata.capabilities.executionTargets.includes("web-worker")) {
-        throw new SolverWorkerRuntimeError(
-          "UNSUPPORTED_EXECUTION_TARGET",
-          `Solver "${command.solverId}" does not support web-worker execution.`,
-        );
-      }
-      if (
-        !adapter.metadata.capabilities.objectives.includes(
-          objectiveKind(command.request),
-        )
-      ) {
-        throw new SolverWorkerRuntimeError(
-          "UNSUPPORTED_OBJECTIVE",
-          `Solver "${command.solverId}" does not support the ${objectiveKind(command.request)} objective.`,
-        );
-      }
+      const metadata = this.#registry.requireMetadata(command.solverId);
+      assertSolverRequestCompatible(metadata, command.request, "web-worker");
     } catch (error) {
       this.#emitFailure(error, command.jobId);
       return;

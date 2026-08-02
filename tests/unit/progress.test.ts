@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   EMPTY_PROGRESS,
   mergeProgress,
+  normalizeProgress,
   parseProgress,
   recordCompletion,
   tryParseProgress,
@@ -29,6 +30,36 @@ test("distinguishes invalid imports and merges only better records", () => {
   );
 });
 
+test("drops impossible records before they can outrank valid completions", () => {
+  const parsed = tryParseProgress(JSON.stringify({
+    version: 1,
+    completed: {
+      valid: {
+        moves: 10,
+        pushes: 3,
+        completedAt: "2026-08-01T00:00:00.000Z",
+      },
+      impossibleCounters: {
+        moves: 2,
+        pushes: 3,
+        completedAt: "2026-08-01T00:00:00.000Z",
+      },
+      unsafeCounters: {
+        moves: Number.MAX_SAFE_INTEGER + 1,
+        pushes: 1,
+        completedAt: "2026-08-01T00:00:00.000Z",
+      },
+      invalidTimestamp: {
+        moves: 8,
+        pushes: 2,
+        completedAt: "not-a-timestamp",
+      },
+    },
+  }));
+
+  assert.deepEqual(Object.keys(parsed?.completed ?? {}), ["valid"]);
+});
+
 test("completion records retain the route with the fewest moves", () => {
   const first = recordCompletion(EMPTY_PROGRESS, "tiny", 30, 8);
   const slower = recordCompletion(first, "tiny", 35, 8);
@@ -39,4 +70,27 @@ test("completion records retain the route with the fewest moves", () => {
   assert.equal(fewerPushes, first);
   assert.equal(fewerMoves.completed.tiny.pushes, 9);
   assert.equal(fewerMoves.completed.tiny.moves, 20);
+});
+
+test("normalizes imported progress against known puzzle ids and reports stale records", () => {
+  const imported = recordCompletion(
+    recordCompletion(EMPTY_PROGRESS, "known", 12, 4),
+    "retired-room",
+    8,
+    3,
+  );
+  const normalized = normalizeProgress(imported, ["known", "another-known"]);
+
+  assert.deepEqual(Object.keys(normalized.progress.completed), ["known"]);
+  assert.equal(normalized.progress.completed.known, imported.completed.known);
+  assert.deepEqual(normalized.ignoredPuzzleIds, ["retired-room"]);
+  assert.ok(Object.isFrozen(normalized.ignoredPuzzleIds));
+});
+
+test("normalization preserves progress identity when every record is known", () => {
+  const imported = recordCompletion(EMPTY_PROGRESS, "known", 12, 4);
+  const normalized = normalizeProgress(imported, new Set(["known"]));
+
+  assert.equal(normalized.progress, imported);
+  assert.deepEqual(normalized.ignoredPuzzleIds, []);
 });

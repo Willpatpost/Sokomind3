@@ -11,7 +11,9 @@ import {
   readStoredValue,
   removeStoredValue,
   writeStoredValue,
+  type StorageMutationResult,
 } from "./storage.ts";
+import { trackPersistenceResult } from "./persistence-health.ts";
 
 export const SAVED_SESSION_VERSION = 1 as const;
 export const MAX_SAVED_ACTIONS = 100_000;
@@ -109,16 +111,18 @@ export function loadSession(
   });
 }
 
-export function saveSession(session: GameSession): boolean {
+export function saveSession(session: GameSession): StorageMutationResult {
   const saved: SavedSession = {
     version: SAVED_SESSION_VERSION,
     puzzleId: session.puzzle.id,
     actionLog: session.actionLog,
     updatedAt: new Date().toISOString(),
   };
-  return writeStoredValue(STORAGE_KEYS.session, JSON.stringify(saved));
+  return trackPersistenceResult(
+    writeStoredValue(STORAGE_KEYS.session, JSON.stringify(saved)),
+  );
 }
 
-export function clearSession(): boolean {
-  return removeStoredValue(STORAGE_KEYS.session);
+export function clearSession(): StorageMutationResult {
+  return trackPersistenceResult(removeStoredValue(STORAGE_KEYS.session));
 }

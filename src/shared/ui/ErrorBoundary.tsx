@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { resetAppData } from "../app-data-reset";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -6,17 +7,6 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   error: Error | null;
-}
-
-function clearAppStorage(): void {
-  try {
-    const keys = Object.keys(localStorage).filter((key) =>
-      key.startsWith("sokomind"),
-    );
-    for (const key of keys) localStorage.removeItem(key);
-  } catch {
-    // Storage may be unavailable in private browsing.
-  }
 }
 
 export class ErrorBoundary extends Component<
@@ -33,8 +23,17 @@ export class ErrorBoundary extends Component<
     console.error("Sokomind caught an unrecoverable rendering error:", error, info);
   }
 
+  #handleReload = () => {
+    window.location.reload();
+  };
+
   #handleReset = () => {
-    clearAppStorage();
+    const confirmed = window.confirm(
+      "Reset Sokomind's saved progress, current attempt, timers, and preferences? This cannot be undone.",
+    );
+    if (!confirmed) return;
+
+    resetAppData();
     window.location.hash = "";
     window.location.reload();
   };
@@ -60,25 +59,50 @@ export class ErrorBoundary extends Component<
           Something went wrong
         </h1>
         <p style={{ maxWidth: "28rem", marginBottom: "1.5rem", color: "var(--ink-muted)" }}>
-          Sokomind hit an unexpected error. Resetting clears your saved progress
-          and reloads the page.
+          Sokomind hit an unexpected error. Try reloading first; your saved
+          progress will stay intact.
         </p>
-        <button
-          onClick={this.#handleReset}
-          type="button"
+        <div
           style={{
-            padding: "0.625rem 1.5rem",
-            fontSize: "0.9375rem",
-            fontWeight: 600,
-            color: "var(--paper-50)",
-            background: "var(--coral-500)",
-            border: "none",
-            borderRadius: "10px",
-            cursor: "pointer",
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            gap: "0.75rem",
           }}
         >
-          Reset and reload
-        </button>
+          <button
+            onClick={this.#handleReload}
+            type="button"
+            style={{
+              padding: "0.625rem 1.5rem",
+              fontSize: "0.9375rem",
+              fontWeight: 600,
+              color: "var(--paper-50)",
+              background: "var(--coral-500)",
+              border: "none",
+              borderRadius: "10px",
+              cursor: "pointer",
+            }}
+          >
+            Reload Sokomind
+          </button>
+          <button
+            onClick={this.#handleReset}
+            type="button"
+            style={{
+              padding: "0.625rem 1.5rem",
+              fontSize: "0.9375rem",
+              fontWeight: 600,
+              color: "var(--ink-950)",
+              background: "transparent",
+              border: "1px solid var(--ink-muted)",
+              borderRadius: "10px",
+              cursor: "pointer",
+            }}
+          >
+            Reset saved data
+          </button>
+        </div>
         <details
           style={{
             marginTop: "2rem",

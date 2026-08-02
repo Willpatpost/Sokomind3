@@ -233,9 +233,12 @@ export function stepSnapshot(
 }
 
 /**
- * Apply one player step. Blocked steps are no-ops and return the same session.
+ * Apply one player step. Blocked steps and steps after completion are no-ops
+ * and return the same session.
  */
 export function move(session: GameSession, direction: Direction): GameSession {
+  if (session.solved) return session;
+
   const transition = stepSnapshot(session.board, session.snapshot, direction);
   if (!transition.moved) return session;
 

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   createSession,
+  move,
   type PuzzleDefinition,
 } from "../../src/core/index.ts";
 import type {
@@ -12,6 +13,7 @@ import type {
   SolverRequest,
   SolverResult,
 } from "../../src/solver/contracts.ts";
+import type { SolverCompatibilityErrorCode } from "../../src/solver/compatibility.ts";
 import {
   RemoteSolverError,
   SolverClientDisposedError,
@@ -107,6 +109,7 @@ function solvedResult(): SolverResult {
 
 function adapter(
   solve: SolverAdapter["solve"],
+  capabilityOverrides: Partial<SolverCapabilities> = {},
 ): SolverAdapter {
   return {
     metadata: {
@@ -114,7 +117,7 @@ function adapter(
       displayName: "Test solver",
       description: "Runtime boundary test adapter",
       version: "1.0.0",
-      capabilities,
+      capabilities: { ...capabilities, ...capabilityOverrides },
     },
     solve,
   };
@@ -172,6 +175,50 @@ describe("solver worker host and client", () => {
     assert.deepEqual(progress, [0.5]);
     assert.equal(host.activeJobCount, 0);
     assert.equal(client.activeJobId, undefined);
+    client.dispose();
+    host.dispose();
+  });
+
+  it("keeps healthy discovery results when another adapter becomes invalid", async () => {
+    const healthy = adapter(async () => solvedResult());
+    const healthyAdapter: SolverAdapter = {
+      ...healthy,
+      metadata: { ...healthy.metadata, id: "healthy-solver" },
+    };
+    const unstableMetadata = {
+      ...healthy.metadata,
+      id: "unstable-solver",
+    };
+    let valid = true;
+    const unstableAdapter = {
+      get metadata() {
+        if (valid) return unstableMetadata;
+        return {
+          ...unstableMetadata,
+          capabilities: {
+            ...unstableMetadata.capabilities,
+            labeledBoxes: undefined,
+          },
+        } as unknown as typeof unstableMetadata;
+      },
+      async solve() {
+        return solvedResult();
+      },
+    } satisfies SolverAdapter;
+    const registry = new SolverRegistry([healthyAdapter, unstableAdapter]);
+    valid = false;
+
+    const [mainTransport, workerTransport] = linkedTransports();
+    const host = new SolverWorkerHost(registry, workerTransport);
+    host.start();
+    const client = new SolverWorkerClient(mainTransport);
+
+    const discovered = await client.discover();
+    assert.deepEqual(
+      discovered.map(({ id }) => id),
+      ["healthy-solver"],
+    );
+
     client.dispose();
     host.dispose();
   });
@@ -346,6 +393,81 @@ describe("solver worker host and client", () => {
 
       const run = client.run("test-solver", request());
       await assert.rejects(run.result, RemoteSolverError);
+      assert.equal(host.activeJobCount, 0);
+      client.dispose();
+      host.dispose();
+    }
+  });
+
+  it("rejects unsupported request features before invoking the adapter", async () => {
+    const labeledPuzzle: PuzzleDefinition = {
+      id: "labeled-runtime",
+      title: "Labeled runtime",
+      difficulty: "tutorial",
+      boxes: 1,
+      rows: ["OOOOO", "ORAaO", "OOOOO"],
+    };
+    const labeledSession = createSession(labeledPuzzle);
+    const labeledRequest: SolverRequest = {
+      board: labeledSession.board,
+      snapshot: labeledSession.snapshot,
+      objective: { kind: "moves" },
+    };
+    const initial = createSession(puzzle);
+    const partial = move(initial, "right");
+    const partialRequest: SolverRequest = {
+      board: partial.board,
+      snapshot: partial.snapshot,
+      objective: { kind: "moves" },
+    };
+    const cases: ReadonlyArray<{
+      request: SolverRequest;
+      capabilities: Partial<SolverCapabilities>;
+      code: SolverCompatibilityErrorCode;
+    }> = [
+      {
+        request: labeledRequest,
+        capabilities: { labeledBoxes: false },
+        code: "UNSUPPORTED_LABELED_BOXES",
+      },
+      {
+        request: request(),
+        capabilities: { genericBoxes: false },
+        code: "UNSUPPORTED_GENERIC_BOXES",
+      },
+      {
+        request: partialRequest,
+        capabilities: { partialState: false },
+        code: "UNSUPPORTED_PARTIAL_STATE",
+      },
+    ];
+
+    for (const testCase of cases) {
+      let solveCalls = 0;
+      const [mainTransport, workerTransport] = linkedTransports();
+      const host = new SolverWorkerHost(
+        new SolverRegistry([
+          adapter(async () => {
+            solveCalls += 1;
+            return solvedResult();
+          }, testCase.capabilities),
+        ]),
+        workerTransport,
+      );
+      host.start();
+      const client = new SolverWorkerClient(mainTransport, {
+        createJobId: () => `job-${testCase.code.toLowerCase()}`,
+      });
+
+      const run = client.run("test-solver", testCase.request);
+      await assert.rejects(
+        run.result,
+        (error: unknown) =>
+          error instanceof RemoteSolverError &&
+          error.name === "SolverCompatibilityError" &&
+          error.code === testCase.code,
+      );
+      assert.equal(solveCalls, 0);
       assert.equal(host.activeJobCount, 0);
       client.dispose();
       host.dispose();

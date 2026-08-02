@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  calculateElapsedTime,
+  nextTimerUpdateDelay,
+} from "./timer-math.ts";
 
 export interface TimerController {
   readonly elapsed: number;
@@ -35,9 +39,12 @@ function readPersistedTime(key: string | undefined): number {
 export function useTimer(options: {
   paused: boolean;
   persistKey?: string;
+  restorePersisted?: boolean;
 }): TimerController {
-  const { paused, persistKey } = options;
-  const [elapsed, setElapsed] = useState(() => readPersistedTime(persistKey));
+  const { paused, persistKey, restorePersisted = true } = options;
+  const [initialElapsed] = useState(() =>
+    restorePersisted ? readPersistedTime(persistKey) : 0);
+  const [elapsed, setElapsed] = useState(initialElapsed);
   const [running, setRunning] = useState(false);
   const stateRef = useRef<{ accumulated: number; resumedAt: number | null }>(
     null as never,
@@ -45,21 +52,55 @@ export function useTimer(options: {
   // Lazy-init the ref so it matches the restored elapsed value on first render.
   if (stateRef.current === null) {
     stateRef.current = {
-      accumulated: readPersistedTime(persistKey),
+      accumulated: initialElapsed,
       resumedAt: null,
     };
   }
-  const rafRef = useRef<number>(0);
+  const timeoutRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (restorePersisted || !persistKey) return;
+    try {
+      sessionStorage.removeItem(persistKey);
+    } catch {
+      // sessionStorage may be unavailable; silently ignore.
+    }
+  }, [persistKey, restorePersisted]);
+
+  const stopTick = useCallback(() => {
+    if (timeoutRef.current === undefined) return;
+    window.clearTimeout(timeoutRef.current);
+    timeoutRef.current = undefined;
+  }, []);
 
   function startTick() {
     const state = stateRef.current;
+    stopTick();
+
     function tick() {
-      if (state.resumedAt !== null) {
-        setElapsed(state.accumulated + (performance.now() - state.resumedAt));
-      }
-      rafRef.current = requestAnimationFrame(tick);
+      if (state.resumedAt === null) return;
+      const nextElapsed = calculateElapsedTime(
+        state.accumulated,
+        state.resumedAt,
+        performance.now(),
+      );
+      setElapsed(nextElapsed);
+      timeoutRef.current = window.setTimeout(
+        tick,
+        nextTimerUpdateDelay(nextElapsed),
+      );
     }
-    rafRef.current = requestAnimationFrame(tick);
+
+    if (state.resumedAt === null) return;
+    const currentElapsed = calculateElapsedTime(
+      state.accumulated,
+      state.resumedAt,
+      performance.now(),
+    );
+    timeoutRef.current = window.setTimeout(
+      tick,
+      nextTimerUpdateDelay(currentElapsed),
+    );
   }
 
   function persistAccumulated() {
@@ -79,10 +120,14 @@ export function useTimer(options: {
 
     if (paused) {
       if (state.resumedAt !== null) {
-        state.accumulated += performance.now() - state.resumedAt;
+        state.accumulated = calculateElapsedTime(
+          state.accumulated,
+          state.resumedAt,
+          performance.now(),
+        );
         state.resumedAt = null;
       }
-      cancelAnimationFrame(rafRef.current);
+      stopTick();
       setElapsed(state.accumulated);
       setRunning(false);
       persistAccumulated();
@@ -92,7 +137,7 @@ export function useTimer(options: {
       setRunning(true);
     }
 
-    return () => cancelAnimationFrame(rafRef.current);
+    return stopTick;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paused]);
 
@@ -101,9 +146,13 @@ export function useTimer(options: {
 
     function handleVisibility() {
       if (document.hidden && state.resumedAt !== null) {
-        state.accumulated += performance.now() - state.resumedAt;
+        state.accumulated = calculateElapsedTime(
+          state.accumulated,
+          state.resumedAt,
+          performance.now(),
+        );
         state.resumedAt = null;
-        cancelAnimationFrame(rafRef.current);
+        stopTick();
         setElapsed(state.accumulated);
         setRunning(false);
         persistAccumulated();
@@ -119,8 +168,27 @@ export function useTimer(options: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paused]);
 
+  useEffect(() => () => {
+    const state = stateRef.current;
+    if (state.resumedAt !== null) {
+      state.accumulated = calculateElapsedTime(
+        state.accumulated,
+        state.resumedAt,
+        performance.now(),
+      );
+      state.resumedAt = null;
+    }
+    stopTick();
+    if (!persistKey) return;
+    try {
+      sessionStorage.setItem(persistKey, String(state.accumulated));
+    } catch {
+      // sessionStorage may be unavailable; silently ignore.
+    }
+  }, [persistKey, stopTick]);
+
   const reset = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
+    stopTick();
     stateRef.current.accumulated = 0;
     stateRef.current.resumedAt = null;
     setElapsed(0);
@@ -132,7 +200,7 @@ export function useTimer(options: {
         // sessionStorage may be unavailable; silently ignore.
       }
     }
-  }, [persistKey]);
+  }, [persistKey, stopTick]);
 
   return { elapsed, running, reset };
 }

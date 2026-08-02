@@ -6,14 +6,22 @@ import {
 } from "@/src/core";
 import { getPuzzleById, PUZZLES } from "@/src/catalog/puzzles";
 import {
-  EMPTY_PROGRESS,
-  loadProgress,
-  mergeProgress,
   recordCompletion,
-  saveProgress,
   type ProgressData,
   type PuzzleRecord,
 } from "@/src/shared/progress";
+import {
+  createProgressWriterId,
+  loadProgressSyncSnapshot,
+  parseProgressSyncSnapshot,
+  persistProgressImport,
+  persistProgressReset,
+  persistProgressUpdate,
+  reconcileProgressSnapshots,
+  writeProgressSyncSnapshot,
+  type ProgressSyncSnapshot,
+} from "@/src/shared/progress-sync";
+import { STORAGE_KEYS } from "@/src/shared/storage";
 import {
   loadSession,
   saveSession,
@@ -27,24 +35,26 @@ export interface CompletionRecordUpdate {
 function createInitialSession(
   puzzleId: string,
   actionLog?: string,
-): GameSession {
+): { readonly session: GameSession; readonly restored: boolean } {
   const puzzle = getPuzzleById(puzzleId);
-  if (!puzzle) return createSession(PUZZLES[0]);
+  if (!puzzle) {
+    return { session: createSession(PUZZLES[0]), restored: false };
+  }
 
   if (actionLog) {
     try {
-      return replayActionLog(puzzle, actionLog);
+      return { session: replayActionLog(puzzle, actionLog), restored: false };
     } catch {
-      return createSession(puzzle);
+      return { session: createSession(puzzle), restored: false };
     }
   }
 
   const stored = loadSession(getPuzzleById);
   if (stored && stored.session.puzzle.id === puzzleId) {
-    return stored.session;
+    return { session: stored.session, restored: stored.resumed };
   }
 
-  return createSession(puzzle);
+  return { session: createSession(puzzle), restored: false };
 }
 
 export function usePersistedPlay(
@@ -52,12 +62,19 @@ export function usePersistedPlay(
   actionLog?: string,
   onSessionRestored?: (moves: number) => void,
 ) {
-  const [session, setSession] = useState<GameSession>(() =>
-    createInitialSession(puzzleId, actionLog),
+  const [initialSession] = useState(() =>
+    createInitialSession(puzzleId, actionLog));
+  const [session, setSession] = useState<GameSession>(initialSession.session);
+  const [sessionRestored, setSessionRestored] = useState(
+    initialSession.restored,
   );
-  const [progress, setProgress] = useState<ProgressData>(loadProgress);
+  const [writerId] = useState(createProgressWriterId);
+  const [initialProgressSnapshot] = useState(loadProgressSyncSnapshot);
+  const progressSyncRef = useRef(initialProgressSnapshot);
+  const [progress, setProgress] = useState<ProgressData>(
+    initialProgressSnapshot.progress,
+  );
   const sessionRef = useRef(session);
-  const progressRef = useRef(progress);
   const initializedRef = useRef(false);
 
   const commitSession = useCallback((next: GameSession) => {
@@ -65,28 +82,23 @@ export function usePersistedPlay(
     setSession(next);
   }, []);
 
-  const commitProgress = useCallback((next: ProgressData) => {
-    progressRef.current = next;
-    setProgress(next);
+  const commitProgressSnapshot = useCallback((next: ProgressSyncSnapshot) => {
+    progressSyncRef.current = next;
+    setProgress(next.progress);
   }, []);
 
   useEffect(() => {
     if (initializedRef.current) {
       const next = createInitialSession(puzzleId, actionLog);
-      commitSession(next);
+      commitSession(next.session);
+      setSessionRestored(next.restored);
     }
     initializedRef.current = true;
   }, [puzzleId, actionLog, commitSession]);
 
   useEffect(() => {
-    const stored = loadSession(getPuzzleById);
-    if (
-      !actionLog &&
-      stored?.resumed &&
-      stored.session.puzzle.id === puzzleId &&
-      stored.session.actionLog.length > 0
-    ) {
-      onSessionRestored?.(stored.session.moves);
+    if (sessionRestored && session.actionLog.length > 0) {
+      onSessionRestored?.(session.moves);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -96,42 +108,79 @@ export function usePersistedPlay(
   }, [session.puzzle.title]);
 
   useEffect(() => {
-    saveProgress(progress);
-  }, [progress]);
-
-  useEffect(() => {
     saveSession(session);
   }, [session]);
 
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      const current = progressSyncRef.current;
+      if (event.key !== STORAGE_KEYS.progress || !current) return;
+
+      if (event.newValue === null) {
+        const reset = persistProgressReset(current, writerId);
+        commitProgressSnapshot(reset.snapshot);
+        return;
+      }
+
+      const incoming = parseProgressSyncSnapshot(event.newValue);
+      if (!incoming) return;
+
+      const reconciliation = reconcileProgressSnapshots(
+        current,
+        incoming,
+        writerId,
+      );
+      commitProgressSnapshot(reconciliation.snapshot);
+      if (reconciliation.shouldPersist) {
+        writeProgressSyncSnapshot(reconciliation.snapshot);
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [commitProgressSnapshot, writerId]);
+
   const recordSolvedSession = useCallback(
     (solved: GameSession): CompletionRecordUpdate => {
-      const current = progressRef.current;
-      const previousBest = current.completed[solved.puzzle.id];
-      const updated = recordCompletion(
+      const current = progressSyncRef.current ?? loadProgressSyncSnapshot();
+      const update = persistProgressUpdate(
         current,
-        solved.puzzle.id,
-        solved.moves,
-        solved.pushes,
+        writerId,
+        (stored) => recordCompletion(
+          stored,
+          solved.puzzle.id,
+          solved.moves,
+          solved.pushes,
+        ),
       );
-      commitProgress(updated);
+      commitProgressSnapshot(update.snapshot);
       return Object.freeze({
-        previousBest,
-        newBest: updated !== current,
+        previousBest: update.previous.completed[solved.puzzle.id],
+        newBest: update.changed,
       });
     },
-    [commitProgress],
+    [commitProgressSnapshot, writerId],
   );
 
   const importProgress = useCallback((imported: ProgressData) => {
-    commitProgress(mergeProgress(progressRef.current, imported));
-  }, [commitProgress]);
+    const current = progressSyncRef.current ?? loadProgressSyncSnapshot();
+    const update = persistProgressImport(
+      current,
+      writerId,
+      imported,
+    );
+    commitProgressSnapshot(update.snapshot);
+  }, [commitProgressSnapshot, writerId]);
 
   const resetProgress = useCallback(() => {
-    commitProgress(EMPTY_PROGRESS);
-  }, [commitProgress]);
+    const current = progressSyncRef.current ?? loadProgressSyncSnapshot();
+    const update = persistProgressReset(current, writerId);
+    commitProgressSnapshot(update.snapshot);
+  }, [commitProgressSnapshot, writerId]);
 
   return {
     session,
+    sessionRestored,
     sessionRef,
     progress,
     commitSession,

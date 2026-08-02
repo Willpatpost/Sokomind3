@@ -56,7 +56,6 @@ function metadataPlugin(publicSiteUrl: string, isProd: boolean): Plugin {
                   "object-src 'none'",
                   "base-uri 'self'",
                   "form-action 'self'",
-                  "frame-ancestors 'none'",
                 ].join("; "),
               },
               injectTo: "head-prepend",
@@ -69,16 +68,59 @@ function metadataPlugin(publicSiteUrl: string, isProd: boolean): Plugin {
 }
 
 function assetManifestPlugin(): Plugin {
+  const serviceWorkerRevisionToken = "__SOKOMIND_BUILD_REVISION__";
+  const revisionInputs = [
+    "index.html",
+    "favicon.svg",
+    "icon-192.png",
+    "icon-512.png",
+    "manifest.webmanifest",
+  ];
+  const runtimeOnlyAssetPrefixes = [
+    "ProgressDialog-",
+    "SolverDialog-",
+    "solver.worker-",
+    "sokomind-engine.worker-",
+  ];
+
   return {
     name: "sokomind-asset-manifest",
     apply: "build",
     async closeBundle() {
       const assetsDir = path.join("dist", "assets");
-      const files = await fs.readdir(assetsDir);
-      const manifest = files.map((f) => `./assets/${f}`);
+      const files = (await fs.readdir(assetsDir)).sort();
+      const precache = files
+        .filter((file) => !runtimeOnlyAssetPrefixes.some((prefix) =>
+          file.startsWith(prefix)))
+        .map((file) => `./assets/${file}`);
+      const runtime = files
+        .filter((file) => runtimeOnlyAssetPrefixes.some((prefix) =>
+          file.startsWith(prefix)))
+        .map((file) => `./assets/${file}`);
+      const manifest = { version: 1, precache, runtime };
+      const serializedManifest = JSON.stringify(manifest, null, 2);
       await fs.writeFile(
         path.join("dist", "asset-manifest.json"),
-        JSON.stringify(manifest, null, 2),
+        serializedManifest,
+      );
+
+      const workerPath = path.join("dist", "sw.js");
+      const workerTemplate = await fs.readFile(workerPath, "utf8");
+      if (!workerTemplate.includes(serviceWorkerRevisionToken)) {
+        throw new Error("Service worker revision token is missing from dist/sw.js.");
+      }
+
+      const revisionHash = crypto.createHash("sha256");
+      revisionHash.update(serializedManifest);
+      revisionHash.update(workerTemplate);
+      for (const relativePath of revisionInputs) {
+        revisionHash.update(relativePath);
+        revisionHash.update(await fs.readFile(path.join("dist", relativePath)));
+      }
+      const revision = revisionHash.digest("hex").slice(0, 16);
+      await fs.writeFile(
+        workerPath,
+        workerTemplate.replaceAll(serviceWorkerRevisionToken, revision),
       );
     },
   };

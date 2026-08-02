@@ -30,6 +30,12 @@ test("parses play route without action log", () => {
   }
 });
 
+test("falls back to home for a malformed encoded puzzle id", () => {
+  const result = parseHash("#/play/%E0%A4%A");
+  assert.equal(result.kind, "route");
+  if (result.kind === "route") assert.equal(result.route.page, "home");
+});
+
 test("parses home route", () => {
   const r1 = parseHash("#/");
   const r2 = parseHash("");
@@ -51,6 +57,23 @@ test("parses puzzle selector routes", () => {
   const r3 = parseHash("#/puzzles/intermediate/Microban");
   assert.equal(r3.kind, "route");
   if (r3.kind === "route") assert.equal(r3.route.page, "puzzles-collection");
+});
+
+test("decodes valid collection names and rejects malformed encodings", () => {
+  const encoded = parseHash("#/puzzles/intermediate/Small%20Rooms");
+  assert.equal(encoded.kind, "route");
+  if (encoded.kind === "route") {
+    assert.equal(encoded.route.page, "puzzles-collection");
+    if (encoded.route.page === "puzzles-collection") {
+      assert.equal(encoded.route.collection, "Small Rooms");
+    }
+  }
+
+  const malformed = parseHash("#/puzzles/intermediate/%");
+  assert.equal(malformed.kind, "route");
+  if (malformed.kind === "route") {
+    assert.equal(malformed.route.page, "home");
+  }
 });
 
 test("parses editor route with custom data", () => {

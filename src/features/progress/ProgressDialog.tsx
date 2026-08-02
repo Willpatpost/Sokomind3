@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { PuzzleDefinition } from "@/src/core/model";
 import {
+  normalizeProgress,
   tryParseProgress,
   type ProgressData,
 } from "@/src/shared/progress";
@@ -39,9 +40,11 @@ export function ProgressDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
-  const totalPuzzles = puzzles.length;
-  const completed = Object.keys(progress.completed).length;
   const stats = useMemo(() => computeStats(progress, puzzles), [progress, puzzles]);
+  const knownPuzzleIds = useMemo(
+    () => puzzles.map((puzzle) => puzzle.id),
+    [puzzles],
+  );
 
   async function importFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
@@ -58,8 +61,15 @@ export function ProgressDialog({
       return;
     }
 
-    onImport(imported);
-    setMessage("Progress imported. Better records were kept.");
+    const normalized = normalizeProgress(imported, knownPuzzleIds);
+    onImport(normalized.progress);
+
+    const ignored = normalized.ignoredPuzzleIds.length;
+    setMessage(
+      ignored > 0
+        ? `Progress imported. ${ignored} unavailable ${ignored === 1 ? "record was" : "records were"} ignored; better records were kept.`
+        : "Progress imported. Better records were kept.",
+    );
   }
 
   return (
@@ -80,12 +90,20 @@ export function ProgressDialog({
         </header>
 
         <div className={styles.summary}>
-          <strong>{completed}</strong>
-          <span>of {totalPuzzles} rooms cleared</span>
+          <strong data-testid="completed-count">{stats.totalSolved}</strong>
+          <span>of {stats.totalPuzzles} rooms cleared</span>
           <div aria-hidden="true">
-            <span style={{ width: `${(completed / totalPuzzles) * 100}%` }} />
+            <span style={{ width: `${stats.completionPercentage}%` }} />
           </div>
         </div>
+
+        {stats.ignoredRecords > 0 ? (
+          <p className={styles.status}>
+            {stats.ignoredRecords} saved unavailable {stats.ignoredRecords === 1
+              ? "record is"
+              : "records are"} not counted.
+          </p>
+        ) : null}
 
         <p className={styles.explanation}>
           Export a portable backup, or import another backup. Imports merge

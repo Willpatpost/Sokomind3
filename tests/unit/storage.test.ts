@@ -4,6 +4,10 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import {
   STORAGE_KEYS,
   LEGACY_STORAGE_KEYS,
+  APP_SESSION_STORAGE_KEYS,
+  APP_SESSION_STORAGE_PREFIXES,
+  APP_STORAGE_KEYS,
+  clearAppStorage,
   readStoredValue,
   writeStoredValue,
   removeStoredValue,
@@ -33,8 +37,14 @@ function createMockStorage(): Storage {
   };
 }
 
-function installMockStorage(storage: Storage): void {
-  (globalThis as Record<string, unknown>).window = { localStorage: storage };
+function installMockStorage(
+  storage: Storage,
+  sessionStorage?: Storage,
+): void {
+  (globalThis as Record<string, unknown>).window = {
+    localStorage: storage,
+    sessionStorage,
+  };
 }
 
 function removeMockStorage(): void {
@@ -57,6 +67,61 @@ describe("STORAGE_KEYS", () => {
 describe("LEGACY_STORAGE_KEYS", () => {
   it("is frozen", () => {
     assert.ok(Object.isFrozen(LEGACY_STORAGE_KEYS));
+  });
+});
+
+describe("clearAppStorage", () => {
+  let storage: Storage;
+  let sessionStorage: Storage;
+
+  beforeEach(() => {
+    storage = createMockStorage();
+    sessionStorage = createMockStorage();
+    installMockStorage(storage, sessionStorage);
+  });
+
+  afterEach(() => {
+    removeMockStorage();
+  });
+
+  it("removes only the exact current and legacy keys owned by this app", () => {
+    for (const key of APP_STORAGE_KEYS) storage.setItem(key, "owned");
+    storage.setItem("sokomind-push-bounds-v1", "another-project");
+    storage.setItem("sokomind.future-key", "unknown");
+    storage.setItem("unrelated", "keep");
+    for (const key of APP_SESSION_STORAGE_KEYS) {
+      sessionStorage.setItem(key, "owned-session");
+    }
+    sessionStorage.setItem(
+      `${APP_SESSION_STORAGE_PREFIXES[0]}ultra-tiny`,
+      "owned-timer",
+    );
+    sessionStorage.setItem("sokomind:timer-adjacent", "another-project");
+    sessionStorage.setItem("unrelated-session", "keep");
+
+    clearAppStorage();
+
+    for (const key of APP_STORAGE_KEYS) assert.equal(storage.getItem(key), null);
+    assert.equal(storage.getItem("sokomind-push-bounds-v1"), "another-project");
+    assert.equal(storage.getItem("sokomind.future-key"), "unknown");
+    assert.equal(storage.getItem("unrelated"), "keep");
+    for (const key of APP_SESSION_STORAGE_KEYS) {
+      assert.equal(sessionStorage.getItem(key), null);
+    }
+    assert.equal(
+      sessionStorage.getItem(`${APP_SESSION_STORAGE_PREFIXES[0]}ultra-tiny`),
+      null,
+    );
+    assert.equal(
+      sessionStorage.getItem("sokomind:timer-adjacent"),
+      "another-project",
+    );
+    assert.equal(sessionStorage.getItem("unrelated-session"), "keep");
+  });
+
+  it("does nothing when storage is unavailable", () => {
+    removeMockStorage();
+    assert.doesNotThrow(() => clearAppStorage());
   });
 });
 
@@ -162,7 +227,7 @@ describe("writeStoredValue", () => {
 
   it("writes a value and returns true", () => {
     const result = writeStoredValue("key", "value");
-    assert.equal(result, true);
+    assert.deepEqual(result, { ok: true, key: "key", operation: "write" });
     assert.equal(storage.getItem("key"), "value");
   });
 
@@ -180,16 +245,26 @@ describe("writeStoredValue", () => {
 
   it("returns false when window is undefined", () => {
     removeMockStorage();
-    assert.equal(writeStoredValue("key", "value"), false);
+    assert.deepEqual(writeStoredValue("key", "value"), {
+      ok: false,
+      key: "key",
+      operation: "write",
+      reason: "unavailable",
+    });
   });
 
-  it("returns false when setItem throws", () => {
+  it("classifies quota failures", () => {
     const throwingStorage = createMockStorage();
     throwingStorage.setItem = () => {
-      throw new DOMException("QuotaExceededError");
+      throw new DOMException("Storage quota exceeded", "QuotaExceededError");
     };
     installMockStorage(throwingStorage);
-    assert.equal(writeStoredValue("key", "value"), false);
+    assert.deepEqual(writeStoredValue("key", "value"), {
+      ok: false,
+      key: "key",
+      operation: "write",
+      reason: "quota-exceeded",
+    });
   });
 });
 
@@ -208,25 +283,39 @@ describe("removeStoredValue", () => {
   it("removes an existing key and returns true", () => {
     storage.setItem("key", "value");
     const result = removeStoredValue("key");
-    assert.equal(result, true);
+    assert.deepEqual(result, { ok: true, key: "key", operation: "remove" });
     assert.equal(storage.getItem("key"), null);
   });
 
   it("returns true even when key does not exist", () => {
-    assert.equal(removeStoredValue("nonexistent"), true);
+    assert.deepEqual(removeStoredValue("nonexistent"), {
+      ok: true,
+      key: "nonexistent",
+      operation: "remove",
+    });
   });
 
   it("returns false when window is undefined", () => {
     removeMockStorage();
-    assert.equal(removeStoredValue("key"), false);
+    assert.deepEqual(removeStoredValue("key"), {
+      ok: false,
+      key: "key",
+      operation: "remove",
+      reason: "unavailable",
+    });
   });
 
-  it("returns false when removeItem throws", () => {
+  it("classifies security failures", () => {
     const throwingStorage = createMockStorage();
     throwingStorage.removeItem = () => {
-      throw new Error("SecurityError");
+      throw new DOMException("Storage is blocked", "SecurityError");
     };
     installMockStorage(throwingStorage);
-    assert.equal(removeStoredValue("key"), false);
+    assert.deepEqual(removeStoredValue("key"), {
+      ok: false,
+      key: "key",
+      operation: "remove",
+      reason: "security-error",
+    });
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "Sokomind — Thoughtful box puzzles",
   "short_name": "Sokomind",
-  "description": "Thirty-two hand-built Sokoban puzzles in a calm, animated play space.",
+  "description": "A large collection of thoughtful Sokoban puzzles in a calm, animated play space.",
   "id": "./",
   "start_url": "./",
   "scope": "./",

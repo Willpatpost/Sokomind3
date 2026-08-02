@@ -9,7 +9,7 @@ import { CompletionDialog } from "@/src/features/game/CompletionDialog";
 import { GameSidebar } from "@/src/features/game/GameSidebar";
 import { MoveNotation } from "@/src/features/game/MoveNotation";
 import { useSwipeControls } from "@/src/features/game/use-swipe-controls";
-import { Link, puzzlesHash } from "@/src/router";
+import { homeHash, Link, puzzlesHash } from "@/src/router";
 import { usePlayController } from "./use-play-controller";
 import styles from "./PlayPage.module.css";
 
@@ -59,7 +59,7 @@ export function PlayPage({ puzzleId, actionLog }: PlayPageProps) {
           <Link href={puzzlesHash()} className={styles.backButton} aria-label="Back to puzzles">
             <span aria-hidden="true">&larr;</span>
           </Link>
-          <Link href={puzzlesHash()} className={styles.brandSmall} aria-label="Sokomind home">
+          <Link href={homeHash()} className={styles.brandSmall} aria-label="Sokomind home">
             <span className={styles.brandMark} aria-hidden="true">
               <span /><span /><span /><span />
             </span>
@@ -69,6 +69,15 @@ export function PlayPage({ puzzleId, actionLog }: PlayPageProps) {
 
         <div className={styles.headerActions}>
           <ExperienceControls />
+          <button
+            aria-label="Open progress"
+            className={styles.utilityButton}
+            type="button"
+            onClick={game.openProgress}
+          >
+            <span aria-hidden="true">%</span>
+            <span className={styles.buttonLabel}>Progress</span>
+          </button>
           <button
             aria-label="Open solver laboratory"
             className={styles.utilityButton}
@@ -156,26 +165,30 @@ export function PlayPage({ puzzleId, actionLog }: PlayPageProps) {
 
       <HowToPlay open={game.helpOpen} onClose={game.closeHelp} />
 
-      <Suspense fallback={null}>
-        <ProgressDialog
-          open={game.progressOpen}
-          progress={progress}
-          puzzles={PUZZLES}
-          onClose={game.closeProgress}
-          onImport={game.importProgress}
-          onReset={game.resetProgress}
-        />
-      </Suspense>
+      {game.progressOpen ? (
+        <Suspense fallback={null}>
+          <ProgressDialog
+            open
+            progress={progress}
+            puzzles={PUZZLES}
+            onClose={game.closeProgress}
+            onImport={game.importProgress}
+            onReset={game.resetProgress}
+          />
+        </Suspense>
+      ) : null}
 
-      <Suspense fallback={null}>
-        <SolverDialog
-          onClose={game.closeSolver}
-          onPlay={game.playSolverSolution}
-          onSaveOptimal={game.saveOptimalRecord}
-          open={game.solverOpen}
-          session={session}
-        />
-      </Suspense>
+      {game.solverOpen ? (
+        <Suspense fallback={null}>
+          <SolverDialog
+            onClose={game.closeSolver}
+            onPlay={game.playSolverSolution}
+            onSaveOptimal={game.saveOptimalRecord}
+            open
+            session={session}
+          />
+        </Suspense>
+      ) : null}
 
       <ConfirmDialog
         confirmLabel="Restart room"

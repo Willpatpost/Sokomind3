@@ -28,6 +28,8 @@ describe("computeStats", () => {
       const stats = computeStats(EMPTY, []);
       assert.equal(stats.totalSolved, 0);
       assert.equal(stats.totalPuzzles, 0);
+      assert.equal(stats.completionPercentage, 0);
+      assert.equal(stats.ignoredRecords, 0);
       assert.equal(stats.totalMoves, 0);
       assert.equal(stats.totalPushes, 0);
       assert.equal(stats.averagePushesPerPuzzle, 0);
@@ -242,6 +244,8 @@ describe("computeStats", () => {
       assert.equal(stats.totalSolved, 1);
       assert.equal(stats.totalMoves, 5);
       assert.equal(stats.totalPushes, 2);
+      assert.equal(stats.completionPercentage, 100);
+      assert.equal(stats.ignoredRecords, 1);
     });
   });
 

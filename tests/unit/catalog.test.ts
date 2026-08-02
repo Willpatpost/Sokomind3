@@ -6,6 +6,7 @@ import {
   PUZZLE_BY_ID,
   PUZZLES,
   getOrderedPuzzles,
+  getPuzzleIndexById,
   getPuzzlesByDifficulty,
 } from "../../src/catalog/puzzles.ts";
 import { validatePuzzle } from "../../src/core/puzzle.ts";
@@ -29,6 +30,13 @@ test("catalog contains canonical + imported puzzles with unique ids", () => {
   assert.ok(PUZZLES.length >= 2194, `expected >=2194 puzzles, got ${PUZZLES.length}`);
   assert.equal(new Set(PUZZLES.map((puzzle) => puzzle.id)).size, PUZZLES.length);
   assert.equal(Object.keys(PUZZLE_BY_ID).length, PUZZLES.length);
+});
+
+test("catalog indexes every puzzle id without repeated scans", () => {
+  for (let index = 0; index < PUZZLES.length; index += 1) {
+    assert.equal(getPuzzleIndexById(PUZZLES[index].id), index);
+  }
+  assert.equal(getPuzzleIndexById("missing-puzzle"), -1);
 });
 
 test("every puzzle has rectangular rows and exactly one robot", () => {

@@ -1,7 +1,9 @@
 # Sokomind follow-up audit
 
-This is the issue list gathered while porting and strengthening Sokomind
-Solver. Resolved items remain documented so their regressions stay visible.
+This is the historical issue list gathered while porting and strengthening
+Sokomind Solver. Resolved items remain documented so their regressions stay
+visible. [`AUDIT-TRACKER.md`](../AUDIT-TRACKER.md) is the authoritative active
+status and records the acceptance evidence for the current audit.
 
 ## Resolved in this pass
 
@@ -26,13 +28,20 @@ accessible drag/keyboard painting, robust Base64URL sharing, and an isolated
 playtest with keyboard, swipe, D-pad, undo, restart, counters, and solved
 feedback.
 
-## Confirmed defects
+## Resolved in the current audit
 
-### P2: IDA* memory limits are incomplete
+### IDA* memory limits
 
-IDA* estimates only its transposition table, ignores geometry, heuristic
-caches, stack, and buffers, and reports zero estimated bytes at completion. A
-one-box solve completed under a declared 128-byte memory ceiling.
+The earlier implementation estimated only its transposition table, ignored
+geometry, heuristic caches, stack, and buffers, and reported zero estimated
+bytes at completion. IDA* now rejects a budget below static allocation,
+enforces conservative dynamic growth estimates, and reports non-zero current,
+peak, and per-category telemetry.
+
+The outer solver worker is now created only when the solver dialog opens and is
+disposed when it closes. Registration, discovery, and worker execution share
+one capability validator for target, objective, labeled/generic boxes, and
+partial-state support.
 
 ## Solver and worker risks
 
@@ -43,11 +52,6 @@ one-box solve completed under a declared 128-byte memory ceiling.
 - Hint requests can overlap the full solver and are hard-coded to
   `classic-astar`. The hint worker has no startup timeout, `error`, or
   `messageerror` recovery after construction.
-- The main solver worker is created when the play page mounts, even while the
-  dialog is closed. The large Sokomind engine chunk is lazy until a search, but
-  the outer worker still pays startup cost.
-- Worker-host capability checks enforce target and objective, but not
-  labeled-box, generic-box, partial-state, or cancellation flags.
 - The editor playtest is deliberately isolated from saved sessions and the
   full solver dialog. Solver-testing a custom draft would need an explicit
   adapter bridge rather than reusing play-page persistence.
@@ -73,17 +77,18 @@ one-box solve completed under a declared 128-byte memory ceiling.
   observed high process RSS on the typed master rooms; reducing successor
   generation and compacting legacy beam nodes remain performance priorities.
 
-## Repository and documentation debt
+## Remaining repository and documentation debt
 
-- Package, storage, deployment, and architecture text still contain the old
-  Sokomind name and site path.
-- The checkout tracks `node_modules`, `dist`, and failed Playwright artifacts
-  and has no `.gitignore`.
-- The tracked dependency tree was copied from Linux and omitted Windows native
-  bindings and command shims. Direct TypeScript/ESLint commands worked, but a
-  Windows Vite build required installing the lockfile-pinned Rolldown binding.
-- The normal test script has no coverage gate. The new expensive Grand Hall
-  guardrail is intentionally separate as `test:solver:huge`.
+- The active tracker retains open work for catalog sharding, bounded large-list
+  rendering, shared solver-run arbitration, and incremental generated-engine
+  modularization.
+- Aggregate coverage and bundle gates now block regressions, and the Grand Hall
+  benchmark is a blocking CI gate. A separate generated-engine coverage floor
+  is still required before the coverage item can be closed.
+- Service-worker revisions, reload-fetched shell resources, cache validation,
+  pruning, and offline lifecycle tests are in place. Route-critical assets are
+  installed for offline refresh; optional Progress/Solver dialogs and both
+  solver workers remain runtime-loaded.
 
 ## Catalog/test coverage
 
