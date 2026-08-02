@@ -56,18 +56,9 @@ test("error recovery reloads safely and confirms exact-key data reset", async ({
     await page.evaluate(() => localStorage.getItem("sokomind.progress.v1")),
   ).toBe("owned-progress");
 
-  await page.unroute("**/assets/HomePage-*.js");
+  await page.route("**/assets/HomePage-*.js", (route) => route.continue());
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Reset saved data" }).click();
-  await page.goto("./", { timeout: 15_000 });
-  const debugState = await page.evaluate(() => ({
-    title: document.title,
-    h1: Array.from(document.querySelectorAll("h1")).map((h) => h.textContent),
-    bodySnippet: document.body?.innerText?.slice(0, 300) ?? "",
-  }));
-  expect.soft(debugState, "webkit page state after reset+goto").toMatchObject({
-    h1: ["Sokomind"],
-  });
   await expect(page.getByRole("heading", { name: "Sokomind" })).toBeVisible({ timeout: 15_000 });
 
   const stored = await page.evaluate(() => {
@@ -133,18 +124,9 @@ test("error recovery reset cannot be resurrected by another active tab", async (
   await expect(
     resetTab.getByRole("heading", { name: "Something went wrong" }),
   ).toBeVisible();
-  await resetTab.unroute("**/assets/HomePage-*.js");
+  await resetTab.route("**/assets/HomePage-*.js", (route) => route.continue());
   resetTab.once("dialog", (dialog) => dialog.accept());
   await resetTab.getByRole("button", { name: "Reset saved data" }).click();
-  await resetTab.goto("./", { timeout: 15_000 });
-  const debugState = await resetTab.evaluate(() => ({
-    title: document.title,
-    h1: Array.from(document.querySelectorAll("h1")).map((h) => h.textContent),
-    bodySnippet: document.body?.innerText?.slice(0, 300) ?? "",
-  }));
-  expect.soft(debugState, "webkit resetTab state after reset+goto").toMatchObject({
-    h1: ["Sokomind"],
-  });
   await expect(
     resetTab.getByRole("heading", { name: "Sokomind" }),
   ).toBeVisible({ timeout: 15_000 });
