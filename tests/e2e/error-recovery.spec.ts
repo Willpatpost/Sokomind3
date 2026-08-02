@@ -59,6 +59,7 @@ test("error recovery reloads safely and confirms exact-key data reset", async ({
   await page.unroute("**/assets/HomePage-*.js");
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Reset saved data" }).click();
+  await page.waitForLoadState("networkidle");
   await expect(page.getByRole("heading", { name: "Sokomind" })).toBeVisible();
 
   const stored = await page.evaluate(() => {
@@ -127,10 +128,12 @@ test("error recovery reset cannot be resurrected by another active tab", async (
   await resetTab.unroute("**/assets/HomePage-*.js");
   resetTab.once("dialog", (dialog) => dialog.accept());
   await resetTab.getByRole("button", { name: "Reset saved data" }).click();
+  await resetTab.waitForLoadState("networkidle");
   await expect(
     resetTab.getByRole("heading", { name: "Sokomind" }),
   ).toBeVisible();
 
+  await staleTab.waitForLoadState("networkidle");
   await expect(
     staleTab.getByRole("heading", { name: "Sokomind" }),
   ).toBeVisible();
