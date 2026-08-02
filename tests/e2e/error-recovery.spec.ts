@@ -32,8 +32,12 @@ test("error recovery reloads safely and confirms exact-key data reset", async ({
 
   let blockHomePage = true;
   await page.route("**/assets/HomePage-*.js", async (route) => {
-    if (blockHomePage) await route.abort();
-    else await route.continue();
+    if (blockHomePage) {
+      await route.abort();
+    } else {
+      const response = await route.fetch();
+      await route.fulfill({ response });
+    }
   });
   await page.goto("./");
   await expect(
@@ -63,6 +67,7 @@ test("error recovery reloads safely and confirms exact-key data reset", async ({
   blockHomePage = false;
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Reset saved data" }).click();
+  await page.goto("./", { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "Sokomind" })).toBeVisible({ timeout: 15_000 });
 
   const stored = await page.evaluate(() => {
@@ -125,8 +130,12 @@ test("error recovery reset cannot be resurrected by another active tab", async (
 
   let blockHomePage = true;
   await resetTab.route("**/assets/HomePage-*.js", async (route) => {
-    if (blockHomePage) await route.abort();
-    else await route.continue();
+    if (blockHomePage) {
+      await route.abort();
+    } else {
+      const response = await route.fetch();
+      await route.fulfill({ response });
+    }
   });
   await resetTab.goto("./");
   await expect(
@@ -135,6 +144,7 @@ test("error recovery reset cannot be resurrected by another active tab", async (
   blockHomePage = false;
   resetTab.once("dialog", (dialog) => dialog.accept());
   await resetTab.getByRole("button", { name: "Reset saved data" }).click();
+  await resetTab.goto("./", { timeout: 15_000 });
   await expect(
     resetTab.getByRole("heading", { name: "Sokomind" }),
   ).toBeVisible({ timeout: 15_000 });
