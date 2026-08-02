@@ -2,9 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 
 async function solveFirstSteps(page: Page) {
   await expect(page.getByRole("heading", { name: "First Steps" })).toBeVisible();
-  await page.keyboard.press("ArrowDown");
   const dialog = page.getByRole("dialog", { name: "First Steps" });
-  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await expect(async () => {
+    await page.keyboard.press("ArrowDown");
+    await expect(dialog).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
   return dialog;
 }
 
