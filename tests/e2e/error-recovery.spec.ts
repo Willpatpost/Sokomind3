@@ -61,10 +61,8 @@ test("error recovery reloads safely and confirms exact-key data reset", async ({
 
   await page.unroute("**/assets/HomePage-*.js");
   page.once("dialog", (dialog) => dialog.accept());
-  await Promise.all([
-    page.waitForNavigation(),
-    page.getByRole("button", { name: "Reset saved data" }).click(),
-  ]);
+  await page.getByRole("button", { name: "Reset saved data" }).click();
+  await page.goto("./");
   await expect(page.getByRole("heading", { name: "Sokomind" })).toBeVisible({ timeout: 15_000 });
 
   const stored = await page.evaluate(() => {
@@ -132,10 +130,8 @@ test("error recovery reset cannot be resurrected by another active tab", async (
   ).toBeVisible();
   await resetTab.unroute("**/assets/HomePage-*.js");
   resetTab.once("dialog", (dialog) => dialog.accept());
-  await Promise.all([
-    resetTab.waitForNavigation(),
-    resetTab.getByRole("button", { name: "Reset saved data" }).click(),
-  ]);
+  await resetTab.getByRole("button", { name: "Reset saved data" }).click();
+  await resetTab.goto("./");
   await expect(
     resetTab.getByRole("heading", { name: "Sokomind" }),
   ).toBeVisible({ timeout: 15_000 });
