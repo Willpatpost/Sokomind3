@@ -1,5 +1,10 @@
-import { lazy, Suspense, useRef } from "react";
-import { PUZZLES } from "@/src/catalog/puzzles";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  PUZZLE_METADATA,
+  getPuzzleMetadataById,
+} from "@/src/catalog/puzzle-metadata";
+import { loadPuzzleById } from "@/src/catalog/puzzle-loader";
+import { isShareableActionLog, type PuzzleDefinition } from "@/src/core";
 import { ConfirmDialog } from "@/src/shared/ui/ConfirmDialog";
 import { isOptimal } from "@/src/shared/optimal-cache";
 import { HowToPlay } from "@/src/features/help/HowToPlay";
@@ -9,7 +14,7 @@ import { CompletionDialog } from "@/src/features/game/CompletionDialog";
 import { GameSidebar } from "@/src/features/game/GameSidebar";
 import { MoveNotation } from "@/src/features/game/MoveNotation";
 import { useSwipeControls } from "@/src/features/game/use-swipe-controls";
-import { homeHash, Link, puzzlesHash } from "@/src/router";
+import { homeHash, Link, puzzlesHash, useRouter } from "@/src/router";
 import { usePlayController } from "./use-play-controller";
 import styles from "./PlayPage.module.css";
 
@@ -34,7 +39,72 @@ interface PlayPageProps {
 }
 
 export function PlayPage({ puzzleId, actionLog }: PlayPageProps) {
-  const game = usePlayController(puzzleId, actionLog);
+  const puzzleExists = getPuzzleMetadataById(puzzleId) !== undefined;
+  const sharedRouteIsValid =
+    actionLog === undefined || isShareableActionLog(actionLog);
+
+  if (!puzzleExists || !sharedRouteIsValid) {
+    return <InvalidPlayRoute />;
+  }
+
+  return <LoadedPlayPage puzzleId={puzzleId} actionLog={actionLog} />;
+}
+
+function InvalidPlayRoute() {
+  const { navigate } = useRouter();
+
+  useEffect(() => {
+    navigate(homeHash(), { replace: true });
+  }, [navigate]);
+
+  return null;
+}
+
+function LoadedPlayPage({ puzzleId, actionLog }: PlayPageProps) {
+  const [puzzle, setPuzzle] = useState<PuzzleDefinition | null>(null);
+  const [failure, setFailure] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void loadPuzzleById(puzzleId).then(
+      (loaded) => {
+        if (!active) return;
+        if (!loaded) {
+          setFailure(new Error(`Puzzle board not found: ${puzzleId}`));
+          return;
+        }
+        setPuzzle(loaded);
+      },
+      (error: unknown) => {
+        if (!active) return;
+        setFailure(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [puzzleId]);
+
+  if (failure) throw failure;
+  if (!puzzle) {
+    return (
+      <main className={styles.page}>
+        <p aria-busy="true" role="status">Loading puzzle…</p>
+      </main>
+    );
+  }
+
+  return <ValidatedPlayPage puzzle={puzzle} actionLog={actionLog} />;
+}
+
+function ValidatedPlayPage({
+  puzzle: definition,
+  actionLog,
+}: {
+  readonly puzzle: PuzzleDefinition;
+  readonly actionLog?: string;
+}) {
+  const game = usePlayController(definition, actionLog);
   const { session, progress } = game;
   const boardWrapRef = useRef<HTMLDivElement>(null);
 
@@ -170,7 +240,7 @@ export function PlayPage({ puzzleId, actionLog }: PlayPageProps) {
           <ProgressDialog
             open
             progress={progress}
-            puzzles={PUZZLES}
+            puzzles={PUZZLE_METADATA}
             onClose={game.closeProgress}
             onImport={game.importProgress}
             onReset={game.resetProgress}

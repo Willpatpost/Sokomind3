@@ -78,3 +78,61 @@ test("share control renders an outbound arrow instead of entity text", async ({
   await expect(share).toContainText("Share");
   await expect(share).not.toContainText("&nearr;");
 });
+
+test("invalid play links return home without overwriting the saved attempt", async ({
+  page,
+}) => {
+  const savedAttempt = JSON.stringify({
+    version: 1,
+    puzzleId: "tutorial-push",
+    actionLog: "ULUR",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+  });
+  await page.addInitScript((serialized) => {
+    localStorage.setItem("sokomind.session.v1", serialized);
+  }, savedAttempt);
+
+  for (const route of [
+    "#/play/not-a-real-puzzle",
+    `#/play/ultra-tiny?play=${"D".repeat(2_001)}`,
+  ]) {
+    await page.goto(`./${route}`);
+    await expect(page).toHaveURL(/#\/$/);
+    await expect(page.getByRole("heading", { name: "Sokomind" })).toBeVisible();
+    expect(
+      await page.evaluate(() => localStorage.getItem("sokomind.session.v1")),
+    ).toBe(savedAttempt);
+  }
+});
+
+test("large collections use URL-addressable accessible pagination", async ({
+  page,
+}) => {
+  await page.goto("./#/puzzles/intermediate/Boxoban%20Medium?page=2");
+  await expect(
+    page.getByRole("heading", { name: "Boxoban Medium" }),
+  ).toBeVisible();
+
+  const rows = page.getByTestId("puzzle-row");
+  await expect(rows).toHaveCount(50);
+  const status = page.getByRole("status").filter({
+    hasText: "Showing 51–100 of 1000 puzzles",
+  });
+  await expect(status).toBeVisible();
+
+  const pages = page.getByRole("navigation", {
+    name: "Boxoban Medium puzzle pages",
+  });
+  await pages.getByRole("link", { name: "3", exact: true }).click();
+  await expect(page).toHaveURL(/Boxoban%20Medium\?page=3$/);
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "Showing 101–150 of 1000 puzzles",
+    }),
+  ).toBeFocused();
+  await expect(rows).toHaveCount(50);
+
+  await page.getByPlaceholder("Search").fill("999");
+  await expect(page).toHaveURL(/Boxoban%20Medium$/);
+  await expect(rows).toHaveCount(1);
+});

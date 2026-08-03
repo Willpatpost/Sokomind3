@@ -306,13 +306,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .iconButton,
-  .switchTrack,
-  .switchTrack::after {
+  :global(html:not([data-motion="full"])) .iconButton,
+  :global(html:not([data-motion="full"])) .switchTrack,
+  :global(html:not([data-motion="full"])) .switchTrack::after {
     transition: none;
   }
 
-  .panel {
+  :global(html:not([data-motion="full"])) .panel {
     animation: none;
   }
 }

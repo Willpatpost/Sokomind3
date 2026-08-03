@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GameSession } from "@/src/core/model";
 import {
-  createSolverWorkerClient,
-  type SolverWorkerClient,
   type SolutionStep,
 } from "@/src/solver";
+import {
+  createHintWorkerConnection,
+  HintWorkerTimeoutError,
+  type HintWorkerConnection,
+} from "./hint-worker-runtime";
 
 const HINT_STEPS = 3;
 const HINT_TIME_LIMIT_MS = 5_000;
+const HINT_WORKER_STARTUP_TIMEOUT_MS = 5_000;
+const HINT_RESULT_TIMEOUT_MS = HINT_TIME_LIMIT_MS + 2_000;
 const HINT_MEMORY_LIMIT = 128 * 1024 * 1024;
 const HINT_SOLVER_ID = "classic-astar";
 
@@ -22,6 +27,7 @@ export interface HintController {
   readonly phase: HintPhase;
   readonly canHint: boolean;
   requestHint(): void;
+  cancel(): void;
 }
 
 interface HintControllerOptions {
@@ -41,21 +47,50 @@ export function useHintController({
   onToast,
 }: HintControllerOptions): HintController {
   const [phase, setPhase] = useState<HintPhase>("idle");
-  const clientRef = useRef<SolverWorkerClient | null>(null);
+  const connectionRef = useRef<HintWorkerConnection | null>(null);
   const tokenRef = useRef(0);
   const failureCountRef = useRef(0);
   const cooldownUntilRef = useRef(0);
 
-  const canHint = !disabled && !session.solved && phase !== "thinking";
+  const canHint = !disabled && !session.solved && phase === "idle";
+
+  const disposeConnection = useCallback(() => {
+    const connection = connectionRef.current;
+    connectionRef.current = null;
+    connection?.dispose();
+  }, []);
+
+  const cancel = useCallback(() => {
+    tokenRef.current += 1;
+    disposeConnection();
+    setPhase("idle");
+  }, [disposeConnection]);
+
+  const recordFailure = useCallback((error: unknown, message: string) => {
+    console.warn("Sokomind: hint worker failure", error);
+    failureCountRef.current += 1;
+    if (failureCountRef.current >= 3) {
+      cooldownUntilRef.current = Date.now() + 30_000;
+      onToast("Hints temporarily unavailable.");
+    } else {
+      onToast(message);
+    }
+    setPhase("idle");
+  }, [onToast]);
 
   useEffect(
     () => () => {
       tokenRef.current += 1;
-      clientRef.current?.dispose();
-      clientRef.current = null;
+      disposeConnection();
     },
-    [],
+    [disposeConnection],
   );
+
+  useEffect(() => {
+    if (!disabled) return;
+    tokenRef.current += 1;
+    disposeConnection();
+  }, [disabled, disposeConnection]);
 
   useEffect(() => {
     failureCountRef.current = 0;
@@ -77,39 +112,45 @@ export function useHintController({
       actionLog: session.actionLog,
     };
 
-    const ensureClient = (): SolverWorkerClient | null => {
-      if (clientRef.current) return clientRef.current;
+    const ensureConnection = (): HintWorkerConnection | null => {
+      if (connectionRef.current) return connectionRef.current;
       try {
         const worker = new Worker(
           new URL("../../solver/solver.worker.ts", import.meta.url),
           { type: "module", name: "sokomind-hint" },
         );
-        const client = createSolverWorkerClient(worker);
-        clientRef.current = client;
-        return client;
+        const connection = createHintWorkerConnection(worker, {
+          startupTimeoutMs: HINT_WORKER_STARTUP_TIMEOUT_MS,
+          onFailure: (error) => {
+            if (connectionRef.current !== connection) return;
+            connectionRef.current = null;
+            tokenRef.current += 1;
+            recordFailure(
+              error,
+              error instanceof HintWorkerTimeoutError
+                ? "The hint solver did not respond — try again."
+                : "The hint solver stopped unexpectedly — try again.",
+            );
+          },
+        });
+        connectionRef.current = connection;
+        return connection;
       } catch (error) {
         console.warn("Sokomind: hint worker failed to start", error);
-        failureCountRef.current += 1;
-        if (failureCountRef.current >= 3) {
-          cooldownUntilRef.current = Date.now() + 30_000;
-          onToast("Hints temporarily unavailable.");
-        } else {
-          onToast("Could not start the hint solver.");
-        }
-        setPhase("idle");
+        recordFailure(error, "Could not start the hint solver.");
         return null;
       }
     };
 
-    const client = ensureClient();
-    if (!client) return;
+    const connection = ensureConnection();
+    if (!connection) return;
 
     void (async () => {
       try {
-        await client.discover();
+        await connection.discover();
         if (tokenRef.current !== token) return;
 
-        const handle = client.run(HINT_SOLVER_ID, {
+        const handle = connection.client.run(HINT_SOLVER_ID, {
           board: session.board,
           snapshot: session.snapshot,
           objective: { kind: "moves" },
@@ -119,7 +160,11 @@ export function useHintController({
           },
         });
 
-        const result = await handle.result;
+        const result = await connection.waitFor(
+          handle.result,
+          HINT_RESULT_TIMEOUT_MS,
+          "The hint worker did not finish the bounded search.",
+        );
         if (tokenRef.current !== token) return;
 
         if (result.status === "solved") {
@@ -128,7 +173,7 @@ export function useHintController({
           setPhase("playing");
           onPlaySteps(hintSteps, fingerprint);
           setTimeout(() => {
-            if (tokenRef.current === token) setPhase("idle");
+            setPhase((current) => current === "playing" ? "idle" : current);
           }, hintSteps.length * 200 + 300);
         } else if (result.status === "unsolved") {
           setPhase("idle");
@@ -137,21 +182,15 @@ export function useHintController({
           setPhase("idle");
         }
       } catch (error) {
-        console.warn("Sokomind: hint search failed", error);
         if (tokenRef.current !== token) return;
-        failureCountRef.current += 1;
-        if (failureCountRef.current >= 3) {
-          cooldownUntilRef.current = Date.now() + 30_000;
-          onToast("Hints temporarily unavailable.");
-        } else {
-          onToast("Hint search failed — try again.");
+        if (connectionRef.current === connection) {
+          connectionRef.current = null;
+          connection.dispose();
         }
-        setPhase("idle");
-        clientRef.current?.dispose();
-        clientRef.current = null;
+        recordFailure(error, "Hint search failed — try again.");
       }
     })();
-  }, [session, disabled, onPlaySteps, onToast]);
+  }, [session, disabled, onPlaySteps, onToast, recordFailure]);
 
-  return { phase, canHint, requestHint };
+  return { phase, canHint, requestHint, cancel };
 }

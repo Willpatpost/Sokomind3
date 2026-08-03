@@ -17,6 +17,11 @@ import type {
 } from "../contracts.ts";
 import { runClassicSearch } from "../search/engine.ts";
 import { scoreSolverObjective } from "../validation.ts";
+import type {
+  EngineCommand,
+  EngineResult,
+} from "./sokomind-engine/engine-protocol.ts";
+import { isEngineResult } from "./sokomind-engine/engine-protocol.ts";
 import {
   resolveSokomindTuning,
   sokomindTuningPayload,
@@ -95,28 +100,6 @@ interface LegacyRecord {
   readonly parent: string | null;
   readonly segment: string | readonly string[];
   readonly robot: readonly [number, number];
-}
-
-interface LegacyMessage {
-  readonly type?: string;
-  readonly path?: unknown;
-  readonly records?: unknown;
-  readonly status?: string;
-  readonly terminationReason?: string;
-  readonly cutoff?: boolean;
-  readonly visited?: number;
-  readonly generated?: number;
-  readonly retained?: number;
-  readonly frontier?: number;
-  readonly peakFrontier?: number;
-  readonly performance?: Readonly<Record<string, unknown>>;
-  readonly error?: string;
-  readonly [key: string]: unknown;
-}
-
-interface EngineCommand {
-  readonly mode: "search" | "bidir-forward" | "bidir-reverse";
-  readonly payload: Readonly<Record<string, unknown>>;
 }
 
 interface EngineMessageEvent {
@@ -810,7 +793,7 @@ function report(
 function updateTelemetry(
   run: SearchRunState,
   id: string,
-  message: LegacyMessage,
+  message: EngineResult,
 ): void {
   const telemetry = run.workerTelemetry.get(id);
   if (!telemetry) return;
@@ -1268,7 +1251,7 @@ async function runPhase(
       if (active.size === 0 && nextPlanIndex >= plans.length) finish();
     };
 
-    const workerFinished = (id: string, message: LegacyMessage) => {
+    const workerFinished = (id: string, message: EngineResult) => {
       const entry = active.get(id);
       if (!entry) return;
       cutoff ||= Boolean(message.cutoff) || message.status === "cutoff";
@@ -1318,9 +1301,16 @@ async function runPhase(
         });
 
         const onMessage: EngineMessageListener = ({ data }) => {
-          if (settled || typeof data !== "object" || data === null) return;
+          if (settled) return;
+          if (!isEngineResult(data)) {
+            failedWorkers += 1;
+            errors.push(`${plan.label} emitted an invalid engine message.`);
+            cleanupWorker(plan.id);
+            continueOrFinish();
+            return;
+          }
           resetWatchdog();
-          const message = data as LegacyMessage;
+          const message: EngineResult = data;
           updateTelemetry(run, plan.id, message);
           try {
             const limit = reachedLimit(run);

@@ -1,18 +1,17 @@
 import { useMemo, useRef, useState, type ChangeEvent } from "react";
-import type { PuzzleDefinition } from "@/src/core/model";
 import {
   normalizeProgress,
   tryParseProgress,
   type ProgressData,
 } from "@/src/shared/progress";
 import { Modal } from "@/src/shared/ui/Modal";
-import { computeStats } from "./compute-stats";
+import { computeStats, type StatsPuzzle } from "./compute-stats";
 import styles from "./ProgressDialog.module.css";
 
 interface ProgressDialogProps {
   readonly open: boolean;
   readonly progress: ProgressData;
-  readonly puzzles: readonly PuzzleDefinition[];
+  readonly puzzles: readonly StatsPuzzle[];
   readonly onClose: () => void;
   readonly onImport: (progress: ProgressData) => void;
   readonly onReset: () => void;
@@ -119,6 +118,7 @@ export function ProgressDialog({
           </button>
           <input
             accept="application/json,.json"
+            aria-label="Import progress backup file"
             className="sr-only"
             onChange={(event) => void importFile(event)}
             ref={inputRef}

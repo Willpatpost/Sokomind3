@@ -3,10 +3,15 @@ import {
   move,
   reset,
   undo,
+  isShareableActionLog,
   type Direction,
+  type PuzzleDefinition,
 } from "@/src/core";
 import { decodeActionLog } from "@/src/core/action-log";
-import { getPuzzleIndexById, PUZZLES } from "@/src/catalog/puzzles";
+import {
+  PUZZLE_METADATA,
+  getPuzzleMetadataIndexById,
+} from "@/src/catalog/puzzle-metadata";
 import type { ProgressData } from "@/src/shared/progress";
 import {
   loadOptimalCache,
@@ -28,7 +33,6 @@ import { usePersistedPlay, type CompletionRecordUpdate } from "./use-persisted-p
 import { useRouter, playHash, puzzlesHash } from "@/src/router";
 import { createShareUrl } from "@/src/router/navigation";
 
-const MAX_SHARED_ACTIONS = 2_000;
 const EMPTY_BOX_SET: ReadonlySet<string> = new Set<string>();
 
 const FEEDBACK_CUES: Readonly<Record<ReturnType<typeof classifyMove>, AudioCue>> = {
@@ -61,7 +65,10 @@ const EMPTY_PLAYBACK: SolutionPlayback = Object.freeze({
   total: 0,
 });
 
-export function usePlayController(puzzleId: string, actionLog?: string) {
+export function usePlayController(
+  puzzle: PuzzleDefinition,
+  actionLog?: string,
+) {
   const { playCue, reducedMotion } = useExperience();
   const { navigate } = useRouter();
   const [toast, setToast] = useState<string | null>(null);
@@ -77,7 +84,7 @@ export function usePlayController(puzzleId: string, actionLog?: string) {
     recordSolvedSession,
     importProgress,
     resetProgress,
-  } = usePersistedPlay(puzzleId, actionLog, handleSessionRestored);
+  } = usePersistedPlay(puzzle, actionLog, handleSessionRestored);
   const [helpOpen, setHelpOpen] = useState(false);
   const [progressOpen, setProgressOpen] = useState(false);
   const [resetConfirmPuzzleId, setResetConfirmPuzzleId] =
@@ -236,17 +243,21 @@ export function usePlayController(puzzleId: string, actionLog?: string) {
   }, [navigate, stopSolutionPlayback]);
 
   const selectPreviousPuzzle = useCallback(() => {
-    const currentIndex = getPuzzleIndexById(session.puzzle.id);
-    if (currentIndex > 0) selectPuzzle(PUZZLES[currentIndex - 1].id);
+    const currentIndex = getPuzzleMetadataIndexById(session.puzzle.id);
+    if (currentIndex > 0) {
+      selectPuzzle(PUZZLE_METADATA[currentIndex - 1].id);
+    }
   }, [session.puzzle.id, selectPuzzle]);
 
   const selectNextPuzzle = useCallback(() => {
-    const currentIndex = getPuzzleIndexById(session.puzzle.id);
-    if (currentIndex < PUZZLES.length - 1) selectPuzzle(PUZZLES[currentIndex + 1].id);
+    const currentIndex = getPuzzleMetadataIndexById(session.puzzle.id);
+    if (currentIndex < PUZZLE_METADATA.length - 1) {
+      selectPuzzle(PUZZLE_METADATA[currentIndex + 1].id);
+    }
   }, [session.puzzle.id, selectPuzzle]);
 
   const handleShare = useCallback(async () => {
-    const includeRoute = session.actionLog.length <= MAX_SHARED_ACTIONS;
+    const includeRoute = isShareableActionLog(session.actionLog);
     const url = createShareUrl(
       window.location,
       session.puzzle.id,
@@ -415,8 +426,8 @@ export function usePlayController(puzzleId: string, actionLog?: string) {
     onPreviousPuzzle: selectPreviousPuzzle,
   });
 
-  const puzzleIndex = getPuzzleIndexById(session.puzzle.id);
-  const nextPuzzle = PUZZLES[puzzleIndex + 1];
+  const puzzleIndex = getPuzzleMetadataIndexById(session.puzzle.id);
+  const nextPuzzle = PUZZLE_METADATA[puzzleIndex + 1];
 
   return {
     session,
@@ -457,6 +468,7 @@ export function usePlayController(puzzleId: string, actionLog?: string) {
     closeProgress: () => setProgressOpen(false),
     openSolver: () => {
       stopSolutionPlayback();
+      hint.cancel();
       setSolverPuzzleId(session.puzzle.id);
     },
     closeSolver: () => setSolverPuzzleId(null),
@@ -470,7 +482,7 @@ export function usePlayController(puzzleId: string, actionLog?: string) {
     saveOptimalRecord: handleSaveOptimal,
     completionAnnouncement: `${session.puzzle.title} solved in ${countLabel(session.moves, "move")} and ${countLabel(session.pushes, "push")}.`,
     resetMessage: `Restarting removes ${countLabel(session.moves, "move")} in this attempt. Your completed personal best is not affected.`,
-    totalPuzzles: PUZZLES.length,
+    totalPuzzles: PUZZLE_METADATA.length,
     puzzleIndex,
     nextPuzzle,
   } as const;

@@ -46,19 +46,28 @@
     <script>
 (function() {
   try {
+    var root = document.documentElement;
     var raw = localStorage.getItem("sokomind.experience.v1");
+    var prefs = raw ? JSON.parse(raw) : {};
+    var motion = prefs.motion;
+    if (motion === "full" || motion === "reduced") {
+      root.dataset.motion = motion;
+    } else if (motion === "system" || !motion) {
+      root.dataset.motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "reduced"
+        : "full";
+    }
     if (raw) {
-      var prefs = JSON.parse(raw);
       var theme = prefs.theme;
       if (theme === "dark" || theme === "light") {
-        document.documentElement.dataset.theme = theme;
+        root.dataset.theme = theme;
       } else if (theme === "system" || !theme) {
         if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-          document.documentElement.dataset.theme = "dark";
+          root.dataset.theme = "dark";
         }
       }
     } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      document.documentElement.dataset.theme = "dark";
+      root.dataset.theme = "dark";
     }
   } catch(e) {}
 })();

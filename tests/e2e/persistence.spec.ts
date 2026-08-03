@@ -31,6 +31,53 @@ async function storedProgressIds(page: Page): Promise<string[]> {
   });
 }
 
+test("home and puzzle selector follow progress updates from another tab", async ({
+  context,
+}) => {
+  const homeTab = await context.newPage();
+  const selectorTab = await context.newPage();
+  const writerTab = await context.newPage();
+  await Promise.all([
+    homeTab.goto("./"),
+    selectorTab.goto("./#/puzzles"),
+    writerTab.goto("./#/play/ultra-tiny"),
+  ]);
+
+  const tutorialCard = selectorTab.getByRole("button", { name: /^Tutorial/ });
+  await expect(homeTab.getByText(/^0 of \d+ rooms cleared$/)).toBeVisible();
+  await expect(tutorialCard).toContainText(/0 of \d+ cleared/);
+
+  await writerTab.evaluate(() => {
+    localStorage.setItem("sokomind.progress.v1", JSON.stringify({
+      version: 2,
+      generation: 0,
+      revision: 1,
+      writerId: "cross-tab-test",
+      completed: {
+        "ultra-tiny": {
+          moves: 1,
+          pushes: 1,
+          completedAt: "2026-08-01T00:00:00.000Z",
+        },
+      },
+    }));
+  });
+  await expect(homeTab.getByText(/^1 of \d+ rooms cleared$/)).toBeVisible();
+  await expect(tutorialCard).toContainText(/1 of \d+ cleared/);
+
+  await writerTab.evaluate(() => {
+    localStorage.setItem("sokomind.progress.v1", JSON.stringify({
+      version: 2,
+      generation: 1,
+      revision: 0,
+      writerId: "cross-tab-reset-test",
+      completed: {},
+    }));
+  });
+  await expect(homeTab.getByText(/^0 of \d+ rooms cleared$/)).toBeVisible();
+  await expect(tutorialCard).toContainText(/0 of \d+ cleared/);
+});
+
 test("two active tabs preserve independent puzzle completions", async ({
   context,
 }) => {
@@ -56,6 +103,9 @@ test("two active tabs preserve independent puzzle completions", async ({
   await firstCompletion.getByRole("button", { name: "Study board" }).click();
   await firstTab.getByRole("button", { name: "Open progress" }).click();
   const progressDialog = firstTab.getByRole("dialog", { name: "Your progress" });
+  await expect(
+    progressDialog.getByLabel("Import progress backup file"),
+  ).toHaveAttribute("type", "file");
   await expect(progressDialog.getByTestId("completed-count")).toHaveText("2");
 });
 

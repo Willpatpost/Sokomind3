@@ -68,8 +68,14 @@ test("deep-links to Grand Hall via legacy URL redirect", async ({ page }) => {
 
 test("persists explicit audio and reduced-motion preferences", async ({ page }) => {
   const audio = page.getByRole("button", { name: /all audio/ });
-  await audio.click();
-  await expect(audio).toHaveAttribute("aria-pressed", "true");
+  const audioSupported = await audio.isEnabled();
+  if (audioSupported) {
+    await audio.click();
+    await expect(audio).toHaveAttribute("aria-pressed", "true");
+  } else {
+    await expect(audio).toBeDisabled();
+    await expect(audio).toHaveAttribute("aria-pressed", "false");
+  }
 
   await page
     .getByRole("button", { name: "Sound and motion settings" })
@@ -78,8 +84,14 @@ test("persists explicit audio and reduced-motion preferences", async ({ page }) 
   await expect(page.locator("html")).toHaveAttribute("data-motion", "reduced");
 
   await page.reload();
-  await expect(
-    page.getByRole("button", { name: "Mute all audio" }),
-  ).toHaveAttribute("aria-pressed", "true");
+  if (audioSupported) {
+    await expect(
+      page.getByRole("button", { name: "Mute all audio" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  } else {
+    await expect(
+      page.getByRole("button", { name: "Turn on all audio" }),
+    ).toBeDisabled();
+  }
   await expect(page.locator("html")).toHaveAttribute("data-motion", "reduced");
 });

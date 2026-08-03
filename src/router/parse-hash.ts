@@ -3,6 +3,13 @@ import type { Route, PuzzleDifficulty } from "./routes";
 
 const VALID_DIFFICULTIES: ReadonlySet<string> = new Set(DIFFICULTIES);
 
+function parsePageNumber(queryString: string): number | undefined {
+  const raw = new URLSearchParams(queryString).get("page");
+  if (!raw || !/^[1-9]\d*$/.test(raw)) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 1 ? value : undefined;
+}
+
 function decodePathSegment(segment: string): string | null {
   try {
     return decodeURIComponent(segment);
@@ -53,14 +60,26 @@ export function parseHash(hash: string): ParseResult {
     }
     if (segments.length >= 2 && VALID_DIFFICULTIES.has(segments[1])) {
       const difficulty = segments[1] as PuzzleDifficulty;
+      const pageNumber = parsePageNumber(queryString);
       if (segments.length === 2) {
-        return { kind: "route", route: { page: "puzzles-difficulty", difficulty } };
+        return {
+          kind: "route",
+          route: { page: "puzzles-difficulty", difficulty, pageNumber },
+        };
       }
       const collection = decodePathSegment(segments[2]);
       if (collection === null) {
         return { kind: "route", route: { page: "home" } };
       }
-      return { kind: "route", route: { page: "puzzles-collection", difficulty, collection } };
+      return {
+        kind: "route",
+        route: {
+          page: "puzzles-collection",
+          difficulty,
+          collection,
+          pageNumber,
+        },
+      };
     }
   }
 

@@ -197,12 +197,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .halo,
-  .motes > span {
+  :global(html:not([data-motion="full"])) .halo,
+  :global(html:not([data-motion="full"])) .motes > span {
     animation: none;
   }
 
-  .motes {
+  :global(html:not([data-motion="full"])) .motes {
     display: none;
   }
 }

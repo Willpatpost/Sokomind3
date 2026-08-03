@@ -30,24 +30,27 @@ test("error recovery reloads safely and confirms exact-key data reset", async ({
     sessionStorage.setItem("sokomind:timer-adjacent", "keep");
   });
 
-  let blockHomePage = true;
-  await page.route("**/assets/HomePage-*.js", (route) => {
-    if (blockHomePage) route.abort();
-    else route.continue();
-  });
-  await page.goto("./");
+  // WebKit retains failed module loads for the Page lifetime. Fail a lazy route
+  // other than Home so recovery can return to the known-good entry screen.
+  await page.route("**/assets/PuzzleSelectorPage-*.js", (route) =>
+    route.abort(),
+  );
+  await page.goto("./#/puzzles");
   await expect(
     page.getByRole("heading", { name: "Something went wrong" }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Reload Sokomind" }).click();
   await page.waitForURL(/[?&]_r=/);
-  await expect(
-    page.getByRole("heading", { name: "Something went wrong" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sokomind" })).toBeVisible();
   expect(
     await page.evaluate(() => localStorage.getItem("sokomind.progress.v1")),
   ).toBe("owned-progress");
+
+  await page.goto("./#/puzzles");
+  await expect(
+    page.getByRole("heading", { name: "Something went wrong" }),
+  ).toBeVisible();
 
   page.once("dialog", async (dialog) => {
     expect(dialog.message()).toContain("This cannot be undone");
@@ -61,10 +64,11 @@ test("error recovery reloads safely and confirms exact-key data reset", async ({
     await page.evaluate(() => localStorage.getItem("sokomind.progress.v1")),
   ).toBe("owned-progress");
 
-  blockHomePage = false;
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Reset saved data" }).click();
-  await expect(page.getByRole("heading", { name: "Sokomind" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "Sokomind" })).toBeVisible({
+    timeout: 15_000,
+  });
 
   const stored = await page.evaluate(() => {
     const rawProgress = localStorage.getItem("sokomind.progress.v1");
@@ -124,16 +128,13 @@ test("error recovery reset cannot be resurrected by another active tab", async (
     sessionStorage.setItem("sokomind:timer:tutorial-push", "9876");
   });
 
-  let blockHomePage = true;
-  await resetTab.route("**/assets/HomePage-*.js", (route) => {
-    if (blockHomePage) route.abort();
-    else route.continue();
-  });
-  await resetTab.goto("./");
+  await resetTab.route("**/assets/PuzzleSelectorPage-*.js", (route) =>
+    route.abort(),
+  );
+  await resetTab.goto("./#/puzzles");
   await expect(
     resetTab.getByRole("heading", { name: "Something went wrong" }),
   ).toBeVisible();
-  blockHomePage = false;
   resetTab.once("dialog", (dialog) => dialog.accept());
   await resetTab.getByRole("button", { name: "Reset saved data" }).click();
   await expect(

@@ -14,6 +14,7 @@ hosting layer with a portable Vite build.
 - System-aware reduced motion plus persistent sound and motion preferences
 - Exact autosave/recovery, undo, guarded restart, and personal bests
 - Shareable puzzle/replay links and portable progress import/export
+- URL-addressable, accessible 50-row catalog pages with on-demand board shards
 - Installable offline PWA behavior with repository-subpath-safe assets
 - Pure immutable game rules with no React or browser dependencies
 - Default Sokomind Solver with structural macros, guided push search, compact
@@ -48,7 +49,9 @@ npm run preview
 npm run typecheck
 npm run lint
 npm test
+npm run test:coverage
 npm run test:browser
+npm run test:solver:multi
 npm run test:solver:huge
 npm run benchmark:solver -- --puzzle=huge
 ```
@@ -85,13 +88,13 @@ Sokomind/
 |-- public/                  PWA, metadata assets, and .nojekyll
 |-- scripts/                 Cross-platform Pages preview/test helpers
 |-- src/
-|   |-- catalog/             Canonical puzzle definitions and indexes
+|   |-- catalog/             Definitions, generated metadata, and board shards
 |   |-- core/                Pure parsing, rules, state, and validation
 |   |-- features/
 |   |   |-- experience/      Audio, music, motion, ambience, celebration
 |   |   |-- game/            Board, controls, and play orchestration
 |   |   |-- help/            Instructions and keyboard guidance
-|   |   |-- library/         Searchable and filterable puzzle curriculum
+|   |   |-- selector/        Searchable and filterable puzzle curriculum
 |   |   |-- progress/        Backup, import, and reset UI
 |   |   `-- solver/          Search controls, telemetry, and route playback
 |   |-- shared/              Safe storage, replay persistence, dialogs, links
@@ -122,6 +125,10 @@ experience --> game UI and App
 `src/core` never imports React, storage, animation, audio, or solver code.
 Solvers consume the same serializable geometry and snapshot types as the game
 and run in a module worker without changing board rendering.
+
+Home and the selector consume a compact generated metadata index. Play routes
+load only the 50-board shard containing the requested puzzle, so the Home
+dependency closure never includes the complete board corpus.
 
 The canonical `U/D/L/R` action log is shared by autosave, exact replay,
 shareable routes, and solver playback. Undo uses a persistent linked

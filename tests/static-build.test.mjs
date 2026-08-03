@@ -19,6 +19,28 @@ async function readBuildFile(relativePath) {
   return readFile(path.join(buildDirectory, relativePath), "utf8");
 }
 
+async function javascriptDependencyClosure(entryPattern) {
+  const assetNames = (await readdir(path.join(buildDirectory, "assets")))
+    .filter((name) => name.endsWith(".js"));
+  const entry = assetNames.find((name) => entryPattern.test(name));
+  assert.ok(entry, `expected an entry chunk matching ${entryPattern}`);
+
+  const closure = new Set();
+  const pending = [entry];
+  while (pending.length > 0) {
+    const name = pending.pop();
+    if (!name || closure.has(name)) continue;
+    closure.add(name);
+    const source = await readBuildFile(`assets/${name}`);
+    for (const match of source.matchAll(
+      /(?:from\s*|import\s*\(\s*)["']\.\/([^"']+\.js)["']/gu,
+    )) {
+      if (assetNames.includes(match[1])) pending.push(match[1]);
+    }
+  }
+  return closure;
+}
+
 const DELIVERY_BUDGETS = Object.freeze({
   allScriptsAndStylesGzipBytes: 300_000,
   largestAssetGzipBytes: 70_000,
@@ -26,6 +48,7 @@ const DELIVERY_BUDGETS = Object.freeze({
   playRouteGzipBytes: 185_000,
   solverWorkerGzipBytes: 30_000,
   engineWorkerGzipBytes: 60_000,
+  puzzleShardGzipBytes: 4_000,
 });
 
 function assertWithinBudget(label, actual, maximum) {
@@ -123,6 +146,7 @@ test("asset manifest lists all hashed build assets", async () => {
     /SolverDialog-/,
     /solver\.worker-/,
     /sokomind-engine\.worker-/,
+    /puzzle-shard-/,
   ]) {
     assert.equal(
       manifest.precache.some((entry) => lazyPattern.test(entry)),
@@ -135,6 +159,10 @@ test("asset manifest lists all hashed build assets", async () => {
       `${lazyPattern} should be declared as a runtime asset`,
     );
   }
+  assert.ok(
+    manifest.runtime.filter((entry) => /puzzle-shard-/u.test(entry)).length > 1,
+    "board data should be split across multiple runtime-loaded shards",
+  );
 });
 
 test("production output is installable and omits public source maps", async () => {
@@ -205,6 +233,17 @@ test("the client bundle contains the playable application", async () => {
   assert.doesNotMatch(allCode, /dist\/server|Cloudflare|wrangler/i);
 });
 
+test("the Home route does not load full puzzle-board data", async () => {
+  const homeClosure = await javascriptDependencyClosure(/^HomePage-/u);
+  assert.equal(
+    [...homeClosure].some((name) => /^puzzle-catalog-/u.test(name)),
+    false,
+    `Home dependency closure unexpectedly includes ${[
+      ...homeClosure,
+    ].filter((name) => /^puzzle-catalog-/u.test(name)).join(", ")}`,
+  );
+});
+
 test("production delivery stays within reviewed gzip budgets", async () => {
   const assetDirectory = path.join(buildDirectory, "assets");
   const assetNames = (await readdir(assetDirectory)).filter((name) =>
@@ -216,6 +255,14 @@ test("production delivery stays within reviewed gzip budgets", async () => {
       return { name, gzipBytes: gzipSync(bytes).byteLength };
     }),
   );
+  const puzzleShards = await Promise.all(
+    (await readdir(assetDirectory))
+      .filter((name) => /^puzzle-shard-.*\.json$/u.test(name))
+      .map(async (name) => ({
+        name,
+        gzipBytes: gzipSync(await readFile(path.join(assetDirectory, name))).byteLength,
+      })),
+  );
 
   const totalGzipBytes = assets.reduce((sum, asset) => sum + asset.gzipBytes, 0);
   const largest = assets.reduce((current, asset) =>
@@ -225,6 +272,15 @@ test("production delivery stays within reviewed gzip budgets", async () => {
     "all production scripts and styles",
     totalGzipBytes,
     DELIVERY_BUDGETS.allScriptsAndStylesGzipBytes,
+  );
+  assert.ok(puzzleShards.length > 1, "expected multiple puzzle board shards");
+  const largestPuzzleShard = puzzleShards.reduce((current, shard) =>
+    shard.gzipBytes > current.gzipBytes ? shard : current,
+  );
+  assertWithinBudget(
+    `largest puzzle board shard (${largestPuzzleShard.name})`,
+    largestPuzzleShard.gzipBytes,
+    DELIVERY_BUDGETS.puzzleShardGzipBytes,
   );
   assertWithinBudget(
     `largest production asset (${largest.name})`,
@@ -241,7 +297,6 @@ test("production delivery stays within reviewed gzip budgets", async () => {
   const sharedRoutePatterns = [
     /^index-/u,
     /^react-vendor-/u,
-    /^puzzle-catalog-/u,
     /^HowToPlay-/u,
     /^compute-stats-/u,
     /^navigation-/u,
@@ -258,6 +313,7 @@ test("production delivery stays within reviewed gzip budgets", async () => {
     "cold Play route without closed dialogs",
     routeGzipBytes([
       ...sharedRoutePatterns,
+      /^puzzle-shard-/u,
       /^PlayPage-/u,
       /^ConfirmDialog-/u,
       /^Modal-/u,

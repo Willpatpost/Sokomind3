@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { PUZZLES, getPuzzleById } from "@/src/catalog/puzzles";
-import { loadProgress } from "@/src/shared/progress";
-import { loadSession } from "@/src/shared/session-persistence";
+import {
+  PUZZLE_METADATA,
+  getPuzzleMetadataById,
+} from "@/src/catalog/puzzle-metadata";
+import { useStoredProgress } from "@/src/shared/use-stored-progress";
+import { loadSessionPuzzleId } from "@/src/shared/session-persistence";
 import { computeStats } from "@/src/features/progress/compute-stats";
 import { ExperienceControls } from "@/src/features/experience";
 import { HowToPlay } from "@/src/features/help/HowToPlay";
@@ -25,20 +28,25 @@ export function HomePage() {
     document.title = "Sokomind";
   }, []);
 
-  const progress = useMemo(() => loadProgress(), []);
-  const stats = useMemo(() => computeStats(progress, PUZZLES), [progress]);
+  const progress = useStoredProgress();
+  const stats = useMemo(
+    () => computeStats(progress, PUZZLE_METADATA),
+    [progress],
+  );
 
   const continueTarget = useMemo(() => {
-    const restored = loadSession(getPuzzleById);
-    return restored?.session.puzzle.id;
+    return loadSessionPuzzleId(
+      (puzzleId) => getPuzzleMetadataById(puzzleId) !== undefined,
+    );
   }, []);
 
   const nextUnsolved = useMemo(() => {
     const completed = new Set(Object.keys(progress.completed));
-    return PUZZLES.find((p) => !completed.has(p.id))?.id;
+    return PUZZLE_METADATA.find((p) => !completed.has(p.id))?.id;
   }, [progress]);
 
-  const continueId = continueTarget ?? nextUnsolved ?? PUZZLES[0].id;
+  const continueId =
+    continueTarget ?? nextUnsolved ?? PUZZLE_METADATA[0]?.id ?? "ultra-tiny";
   const pct = stats.completionPercentage;
 
   return (

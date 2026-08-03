@@ -47,7 +47,7 @@ test("an online navigation 404 cannot poison the offline app shell", async ({
   }
 });
 
-test("installation leaves dialog chunks and solver workers lazy", async ({
+test("a runtime dialog chunk fills on demand and reopens offline", async ({
   context,
   page,
 }) => {
@@ -91,11 +91,65 @@ test("installation leaves dialog chunks and solver workers lazy", async ({
     );
   }
 
+  const loadedPuzzleShard = state?.manifest.runtime.find((entry) =>
+    /puzzle-shard-000-.*\.json$/u.test(entry));
+  expect(loadedPuzzleShard).toBeTruthy();
+  const loadedPuzzleShardUrl = new URL(
+    loadedPuzzleShard ?? "",
+    page.url(),
+  ).href;
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async ({ cachePrefix, assetUrl }) => {
+          const cacheName = (await caches.keys()).find((name) =>
+            name.startsWith(cachePrefix));
+          if (!cacheName) return false;
+          return Boolean(await caches.open(cacheName).then((cache) =>
+            cache.match(assetUrl)));
+        },
+        { cachePrefix: CACHE_PREFIX, assetUrl: loadedPuzzleShardUrl },
+      ),
+    )
+    .toBe(true);
+
+  const progressAsset = state?.manifest.runtime.find((entry) =>
+    /ProgressDialog-.*\.js$/u.test(entry));
+  expect(progressAsset).toBeTruthy();
+  const progressAssetUrl = new URL(progressAsset ?? "", page.url()).href;
+  expect(state?.cachedUrls).not.toContain(progressAssetUrl);
+
+  await page.getByRole("button", { name: "Open progress" }).click();
+  const progressDialog = page.getByRole("dialog", { name: "Your progress" });
+  await expect(progressDialog).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async ({ cachePrefix, assetUrl }) => {
+          const cacheName = (await caches.keys()).find((name) =>
+            name.startsWith(cachePrefix));
+          if (!cacheName) return false;
+          return Boolean(await caches.open(cacheName).then((cache) =>
+            cache.match(assetUrl)));
+        },
+        { cachePrefix: CACHE_PREFIX, assetUrl: progressAssetUrl },
+      ),
+    )
+    .toBe(true);
+  await progressDialog.getByRole("button", { name: "Close" }).click();
+
   await context.setOffline(true);
   try {
     await page.reload();
     await expect(
       page.getByRole("heading", { name: "First Steps" }),
+    ).toBeVisible();
+    expect(await page.evaluate(() =>
+      sessionStorage.getItem("sokomind-test-document-loads"))).toBe("2");
+
+    await page.getByRole("button", { name: "Open progress" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Your progress" }),
     ).toBeVisible();
   } finally {
     await context.setOffline(false);
@@ -108,6 +162,18 @@ test("a revised worker replaces old caches and prunes unexpected entries", async
   await page.goto("./");
   await expect(page.getByRole("heading", { name: "Sokomind" })).toBeVisible();
   await waitForServiceWorkerControl(page);
+
+  const initialGeneration = await page.evaluate(async (cachePrefix) => ({
+    controllerUrl: navigator.serviceWorker.controller?.scriptURL ?? null,
+    cacheNames: (await caches.keys())
+      .filter((name) => name.startsWith(cachePrefix))
+      .sort(),
+  }), CACHE_PREFIX);
+  expect(initialGeneration.controllerUrl).toMatch(/\/sw\.js$/u);
+  expect(initialGeneration.cacheNames).toHaveLength(1);
+  expect(initialGeneration.cacheNames).not.toContain(
+    `${CACHE_PREFIX}${UPDATE_REVISION}`,
+  );
 
   await page.goto("./manifest.webmanifest");
   await page.evaluate(
@@ -158,6 +224,10 @@ test("a revised worker replaces old caches and prunes unexpected entries", async
       page.evaluate(() => navigator.serviceWorker.controller?.scriptURL ?? ""),
     )
     .toContain(`playwright-sw-revision=${UPDATE_REVISION}`);
+
+  const updatedControllerUrl = await page.evaluate(() =>
+    navigator.serviceWorker.controller?.scriptURL ?? null);
+  expect(updatedControllerUrl).not.toBe(initialGeneration.controllerUrl);
 
   await expect
     .poll(() =>

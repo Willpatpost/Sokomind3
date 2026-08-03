@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ActionLogError,
+  MAX_SHARED_ACTIONS,
   createSession,
   decodeActionCode,
   decodeActionLog,
@@ -10,6 +11,7 @@ import {
   encodeDirection,
   isActionCode,
   isActionLog,
+  isShareableActionLog,
   move,
   replayActionLog,
   stepSnapshot,
@@ -49,6 +51,13 @@ test("encodes and strictly decodes compact U/D/L/R actions", () => {
   assert.equal(isActionLog("UDLR"), true);
   assert.equal(isActionLog("u"), false);
   assert.ok(Object.isFrozen(decodeActionLog("R")));
+});
+
+test("shared action logs are limited to the outbound sharing budget", () => {
+  assert.equal(MAX_SHARED_ACTIONS, 2_000);
+  assert.equal(isShareableActionLog("R".repeat(MAX_SHARED_ACTIONS)), true);
+  assert.equal(isShareableActionLog("R".repeat(MAX_SHARED_ACTIONS + 1)), false);
+  assert.equal(isShareableActionLog("R?"), false);
 });
 
 test("reports the exact index and symbol of a corrupt action log", () => {

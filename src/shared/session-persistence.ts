@@ -34,6 +34,8 @@ export type PuzzleResolver = (
   puzzleId: string,
 ) => PuzzleDefinition | undefined;
 
+export type PuzzleIdPredicate = (puzzleId: string) => boolean;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
@@ -109,6 +111,22 @@ export function loadSession(
     session: createSession(legacyPuzzle),
     resumed: false,
   });
+}
+
+/**
+ * Resolve only the saved catalog pointer for lightweight entry screens. The
+ * Play route performs the full board replay before it resumes an attempt.
+ */
+export function loadSessionPuzzleId(
+  isKnownPuzzleId: PuzzleIdPredicate,
+): string | null {
+  const stored = parseSavedSession(readStoredValue(STORAGE_KEYS.session));
+  if (stored && isKnownPuzzleId(stored.puzzleId)) return stored.puzzleId;
+
+  const legacyPuzzleId = readStoredValue(LEGACY_STORAGE_KEYS.currentPuzzle);
+  return legacyPuzzleId && isKnownPuzzleId(legacyPuzzleId)
+    ? legacyPuzzleId
+    : null;
 }
 
 export function saveSession(session: GameSession): StorageMutationResult {

@@ -1,6 +1,7 @@
-import type { Difficulty, PuzzleDefinition } from "../../core/model.ts";
-import { DIFFICULTY_ORDER } from "../../catalog/puzzles.ts";
+import { DIFFICULTIES, type Difficulty } from "../../core/model.ts";
 import type { ProgressData } from "../../shared/progress.ts";
+
+const DIFFICULTY_ORDER = DIFFICULTIES;
 
 const DIFFICULTY_LABELS: Record<Difficulty, string> = {
   tutorial: "Tutorial",
@@ -36,9 +37,16 @@ export interface AggregateStats {
   readonly bestEfficiency: BestEfficiency | null;
 }
 
+export interface StatsPuzzle {
+  readonly id: string;
+  readonly title: string;
+  readonly difficulty: Difficulty;
+  readonly boxes: number;
+}
+
 export function computeStats(
   progress: ProgressData,
-  puzzles: readonly PuzzleDefinition[],
+  puzzles: readonly StatsPuzzle[],
 ): AggregateStats {
   const knownPuzzleIds = new Set(puzzles.map((puzzle) => puzzle.id));
   const tierCounts = new Map<Difficulty, { solved: number; total: number }>();

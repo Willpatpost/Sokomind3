@@ -6,9 +6,11 @@ import {
   PUZZLE_BY_ID,
   PUZZLES,
   getOrderedPuzzles,
+  getEffectiveCollection,
   getPuzzleIndexById,
   getPuzzlesByDifficulty,
 } from "../../src/catalog/puzzles.ts";
+import { PUZZLE_METADATA } from "../../src/catalog/puzzle-metadata.ts";
 import { validatePuzzle } from "../../src/core/puzzle.ts";
 
 const RESERVED_UPPERCASE = new Set(["O", "R", "S", "X"]);
@@ -37,6 +39,22 @@ test("catalog indexes every puzzle id without repeated scans", () => {
     assert.equal(getPuzzleIndexById(PUZZLES[index].id), index);
   }
   assert.equal(getPuzzleIndexById("missing-puzzle"), -1);
+});
+
+test("lightweight metadata stays aligned with the board catalog", () => {
+  assert.deepEqual(
+    PUZZLE_METADATA,
+    PUZZLES.map((puzzle, index) => ({
+      id: puzzle.id,
+      title: puzzle.title,
+      difficulty: puzzle.difficulty,
+      boxes: puzzle.boxes,
+      width: puzzle.rows[0]?.length ?? 0,
+      height: puzzle.rows.length,
+      collection: getEffectiveCollection(puzzle),
+      shard: `puzzle-shard-${String(Math.floor(index / 50)).padStart(3, "0")}`,
+    })),
+  );
 });
 
 test("every puzzle has rectangular rows and exactly one robot", () => {

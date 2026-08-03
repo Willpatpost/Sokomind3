@@ -31,7 +31,10 @@ artifact can live below a GitHub repository path.
 
 - `src/core` owns validation, parsing, immutable transitions, and JSON-safe
   types. It has no React, browser storage, sound, animation, or solver imports.
-- `src/catalog` owns the curated puzzle definitions and catalog queries.
+- `src/catalog` owns the curated puzzle definitions, the generated compact
+  metadata index, bounded 50-board JSON shards, and the async shard loader.
+  Home, progress, and selector views depend on metadata; only Play loads board
+  rows, and it fetches the single shard containing the requested puzzle.
 - `src/solver` owns contracts, discovery, recursive runtime validation,
   independent solution verification, search algorithms, cancellation, and the
   worker host/client. It depends only on core model types.
@@ -157,7 +160,7 @@ AlphaEvolve tuning surface.
 
 ## Deadlock bridge
 
-`src/core/deadlock-bridge.ts` bridges game-layer types to the solver's static
+`src/solver/deadlock-bridge.ts` bridges game-layer types to the solver's static
 deadlock checks without pulling the full solver into the game feature. It
 detects corner deadlocks via `isStaticDeadCell` and 2x2 freeze deadlocks via
 `createsFullyBlockedTwoByTwoDeadlock`. A `WeakMap<ParsedBoard, CompiledSearchBoard>`
@@ -169,11 +172,13 @@ attribute so the visual layer can highlight them.
 
 `src/features/game/use-hint-controller.ts` manages a lazy solver worker that
 runs a move-minimizing A* search with a 5-second time limit and 128 MB memory
-limit. The worker is created on first request and reused across hints
-within a session. When a solution is found, the first three steps are played
-via `playSolverSolution`. The H key and a toolbar button between Undo and
-Restart trigger hint requests. See `solver-integration.md` for worker
-lifecycle details.
+limit. A connection owner enforces startup and result watchdogs, handles
+`error` and `messageerror`, and terminates silent, failed, cancelled, or
+disabled workers. Opening the full Solver Lab synchronously cancels any hint
+run before allocating its worker. When a solution is found, the first three
+steps are played via `playSolverSolution`. The H key and a toolbar button
+between Undo and Restart trigger hint requests. See `solver-integration.md`
+for worker lifecycle details.
 
 ## Undo trail
 
@@ -208,9 +213,13 @@ that the replay system can animate.
 ## Static delivery
 
 The production artifact includes relative assets, a web manifest, install
-icons, and a subpath-safe service worker. The PWA shell is an enhancement: a
-registration or cache failure cannot block the online game. Canonical and
-social URLs are injected from `VITE_PUBLIC_SITE_URL`.
+icons, and a subpath-safe service worker. Installation precaches the shell,
+route code, and shared application dependencies. Optional dialog and worker
+chunks plus the bounded board shards are fetched and cached on demand;
+activation validates the new generation and prunes obsolete Sokomind caches.
+The PWA shell is an
+enhancement: a registration or cache failure cannot block the online game.
+Canonical and social URLs are injected from `VITE_PUBLIC_SITE_URL`.
 
 ## Correctness safeguards
 

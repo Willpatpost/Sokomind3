@@ -251,6 +251,65 @@
   gap: 4px;
 }
 
+.resultSummary {
+  margin: 4px 0 10px;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.resultSummary:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--sage-500);
+  outline-offset: 3px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 24px 0 32px;
+}
+
+.pageNumbers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+
+.pageLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid rgb(23 25 22 / 0.1);
+  border-radius: 8px;
+  color: var(--ink-700);
+  background: rgb(251 250 245 / 0.6);
+  font-size: 0.72rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.pageLink:hover,
+.pageLink:focus-visible {
+  border-color: var(--sage-500);
+}
+
+.pageLink[aria-current="page"] {
+  border-color: var(--sage-700);
+  color: var(--paper-50);
+  background: var(--sage-700);
+}
+
+.pageLink[aria-disabled="true"] {
+  opacity: 0.45;
+}
+
 .puzzleItem {
   display: flex;
   align-items: center;
@@ -323,6 +382,11 @@
   .pageTitle {
     font-size: 1.3rem;
   }
+
+  .pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 :global(html[data-theme="dark"]) .backButton {
@@ -359,4 +423,14 @@
 :global(html[data-theme="dark"]) .puzzleItem:hover {
   border-color: rgb(255 255 255 / 0.06);
   background: rgb(34 36 32 / 0.5);
+}
+
+:global(html[data-theme="dark"]) .pageLink {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(34 36 32 / 0.6);
+}
+
+:global(html[data-theme="dark"]) .pageLink[aria-current="page"] {
+  border-color: var(--sage-600);
+  background: var(--sage-700);
 }

@@ -3,10 +3,12 @@ import test from "node:test";
 import { PUZZLES, getPuzzleById } from "../../src/catalog/puzzles.ts";
 import { move } from "../../src/core/index.ts";
 import {
+  loadSessionPuzzleId,
   parseSavedSession,
   restoreSession,
   type SavedSession,
 } from "../../src/shared/session-persistence.ts";
+import { STORAGE_KEYS } from "../../src/shared/storage.ts";
 
 test("parses only versioned and bounded canonical saved sessions", () => {
   const parsed = parseSavedSession(
@@ -82,4 +84,29 @@ test("rejects unknown puzzles and blocked stored actions", () => {
     }, getPuzzleById),
     null,
   );
+});
+
+test("reads a known saved puzzle pointer without loading board data", () => {
+  const values = new Map<string, string>([
+    [STORAGE_KEYS.session, JSON.stringify({
+      version: 1,
+      puzzleId: "ultra-tiny",
+      actionLog: "",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+    })],
+  ]);
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+  } as Storage;
+  (globalThis as Record<string, unknown>).window = { localStorage: storage };
+
+  try {
+    assert.equal(
+      loadSessionPuzzleId((puzzleId) => puzzleId === "ultra-tiny"),
+      "ultra-tiny",
+    );
+    assert.equal(loadSessionPuzzleId(() => false), null);
+  } finally {
+    Reflect.deleteProperty(globalThis as Record<string, unknown>, "window");
+  }
 });

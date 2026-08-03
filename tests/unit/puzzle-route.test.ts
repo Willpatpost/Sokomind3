@@ -5,6 +5,8 @@ import {
   createShareUrl,
   playHash,
   editorHash,
+  puzzleCollectionPageHash,
+  puzzleDifficultyPageHash,
   puzzlesHash,
   homeHash,
 } from "../../src/router/navigation.ts";
@@ -57,6 +59,21 @@ test("parses puzzle selector routes", () => {
   const r3 = parseHash("#/puzzles/intermediate/Microban");
   assert.equal(r3.kind, "route");
   if (r3.kind === "route") assert.equal(r3.route.page, "puzzles-collection");
+
+  const paged = parseHash("#/puzzles/intermediate/Boxoban%20Medium?page=7");
+  assert.equal(paged.kind, "route");
+  if (paged.kind === "route" && paged.route.page === "puzzles-collection") {
+    assert.equal(paged.route.pageNumber, 7);
+  }
+
+  const invalidPage = parseHash("#/puzzles/intermediate/Microban?page=-1");
+  assert.equal(invalidPage.kind, "route");
+  if (
+    invalidPage.kind === "route" &&
+    invalidPage.route.page === "puzzles-collection"
+  ) {
+    assert.equal(invalidPage.route.pageNumber, undefined);
+  }
 });
 
 test("decodes valid collection names and rejects malformed encodings", () => {
@@ -115,6 +132,18 @@ test("navigation helpers produce correct hashes", () => {
   assert.equal(playHash("huge", "UDLR"), "#/play/huge?play=UDLR");
   assert.equal(editorHash(), "#/editor");
   assert.equal(editorHash("abc"), "#/editor?custom=abc");
+  assert.equal(
+    puzzleDifficultyPageHash("intermediate", 2),
+    "#/puzzles/intermediate?page=2",
+  );
+  assert.equal(
+    puzzleCollectionPageHash("intermediate", "Boxoban Medium", 3),
+    "#/puzzles/intermediate/Boxoban%20Medium?page=3",
+  );
+  assert.equal(
+    puzzleCollectionPageHash("intermediate", "Microban", 1),
+    "#/puzzles/intermediate/Microban",
+  );
 });
 
 test("preserves a static-site path when creating share URLs", () => {

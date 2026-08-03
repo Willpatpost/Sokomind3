@@ -340,13 +340,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .board,
-  .box,
-  .robot {
+  :global(html:not([data-motion="full"])) .board,
+  :global(html:not([data-motion="full"])) .box,
+  :global(html:not([data-motion="full"])) .robot {
     animation: none;
   }
 
-  .trailLayer {
+  :global(html:not([data-motion="full"])) .trailLayer {
     display: none;
   }
 }

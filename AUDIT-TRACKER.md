@@ -1,6 +1,6 @@
 # Sokomind Codebase Audit Tracker
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 This is the active tracker for the repository architecture, correctness, performance, deployment, testing, accessibility, and maintenance audit. Update an item's status only after its acceptance checks pass.
 
@@ -50,19 +50,19 @@ At the start of this audit:
 | C7 | Low | `FIXED` | Home's next-unsolved fallback is unreachable |
 | D1 | High | `FIXED` | Public URL metadata and test mount paths are not portable |
 | D2 | High | `FIXED` | A navigation 404 can overwrite the cached application shell |
-| D3 | Medium | `IN PROGRESS` | Service-worker revisions and cached assets are not reconciled |
+| D3 | Medium | `FIXED` | Service-worker revisions and cached assets are not reconciled |
 | D4 | Low | `FIXED` | Framing protection is declared in a CSP delivery mode that browsers ignore |
 | P1 | High | `FIXED` | The timer publishes React state every animation frame |
-| P2 | Medium | `OPEN` | The complete puzzle-board catalog is an eager Home dependency |
-| P3 | Medium | `OPEN` | Large collections render every puzzle row at once |
+| P2 | Medium | `FIXED` | The complete puzzle-board catalog is an eager Home dependency |
+| P3 | Medium | `FIXED` | Large collections render every puzzle row at once |
 | P4 | Medium | `FIXED` | Closed lazy dialogs and the solver worker initialize eagerly |
-| P5 | Medium | `OPEN` | Hint and full-solver runs can contend for resources |
+| P5 | Medium | `FIXED` | Hint and full-solver runs can contend for resources |
 | S1 | High | `FIXED` | IDA* does not account for or enforce its full memory budget |
 | S2 | Medium | `FIXED` | Solver registration and execution validate different capabilities |
-| S3 | Medium | `OPEN` | The generated classic solver is a large weakly checked boundary |
+| S3 | Medium | `IN PROGRESS` | The generated classic solver is a large weakly checked boundary |
 | T1 | Medium | `FIXED` | Performance regressions do not reliably block deployment |
 | T2 | Medium | `FIXED` | Generated-engine synchronization is not checked before unit tests |
-| T3 | Medium | `IN PROGRESS` | Coverage and delivery bundle budgets are not enforced |
+| T3 | Medium | `FIXED` | Coverage and delivery bundle budgets are not enforced |
 | T4 | Low | `FIXED` | Workflow/action/dependency update guardrails can be stronger |
 | A1 | Medium | `FIXED` | Same-page route changes do not consistently announce or focus new content |
 | M1 | Low | `FIXED` | Product naming, puzzle-count metadata, and audit links are stale or inconsistent |
@@ -78,21 +78,33 @@ At the start of this audit:
 | C5-C7 | Play controllers remount by puzzle/action identity, timer restoration requires a matching saved attempt, imported progress is catalog-normalized with safe counter/timestamp invariants, and Continue uses saved session -> first unsolved -> first puzzle precedence. |
 | D1 | Public metadata derives from `PUBLIC_SITE_URL`/repository metadata, preview paths are configurable, and the sole product name is `Sokomind`. An arbitrary `/nested-audit/` mount passed its browser test. |
 | D2 | The service worker installs an immutable known-good shell and never replaces it with an arbitrary navigation response. |
-| D3 | Build-derived revisions, reload-fetched shell resources, staged-cache validation, awaited writes, runtime caching, and old-generation pruning are complete. Progress/Solver dialog chunks and both solver workers are absent after installation, and first installation no longer forces a document reload. Lazy route chunks and the catalog are still precached; deriving and enforcing a critical-root dependency closure plus validating runtime fill and a genuine two-build upgrade remain open. |
+| D3 | Build-derived revisions, staged-cache validation, awaited writes, runtime fill, and old-generation pruning are enforced. Dialogs, workers, and 44 board shards remain runtime-loaded; browser tests prove on-demand fill, offline reuse, navigation-404 safety, and distinct worker-generation replacement. |
 | D4 | The ineffective meta-delivered `frame-ancestors` directive was removed and the GitHub Pages response-header limitation is documented. |
 | P1 | Timer updates align to visible second boundaries while exact elapsed time remains in refs/persistence; puzzle lookup now uses a precomputed ID index. |
-| P2-P3 | Still open: split catalog metadata from board payloads, then bound large selector DOM with accessible pagination or virtualization. |
+| P2-P3 | A generated metadata index keeps Home and the selector independent of board payloads. Play fetches one of 44 bounded board shards, while 1,000-room collections expose URL-addressable 50-row pages with focus and filter reset behavior. |
 | P4 | Progress and solver dialogs mount only while open; solver clients/workers are created on demand and disposed on close. |
-| P5 | Still open: one arbiter must coordinate hint and full-solver resource use and liveness handling. |
+| P5 | Hint workers have startup/result watchdogs plus error/message-error handling, cancellation terminates ownership deterministically, and opening the full solver synchronously cancels hints before allocating its worker. |
 | S1 | IDA* now estimates static and dynamic retained memory, enforces the ceiling before and during search, and reports category/current/peak telemetry. |
 | S2 | One capability validator now covers registration, discovery, and pre-dispatch compatibility with typed failure codes and invalid-adapter isolation. |
-| S3 | Still open: tighten generated-engine request/result contracts, add its separate coverage floor, and incrementally extract modules. The synchronization gate in T2 is an initial boundary control, not completion of S3. |
+| S3 | Shared command/result envelopes, runtime guards in both directions, malformed-message failure behavior, declaration synchronization, and a separate generated-engine coverage floor are complete. Exact nested payload extraction and incremental module conversion remain ongoing architecture work. |
 | T1-T2 | Multi-puzzle and Huge performance tests are blocking CI gates; Huge bounds search/rewrite/total time; generated-engine synchronization runs before unit tests. |
-| T3 | Aggregate coverage floors and per-target gzip budgets are enforced and passing. Separate non-decreasing typed/generated coverage floors remain open, so this item is not marked fixed. |
+| T3 | Independent typed/generated coverage floors and per-target gzip budgets are enforced. Home closure, workers, largest asset, and each board shard have readable non-regression failures. |
 | T4 | Actions are pinned to reviewed commit SHAs, deployment explicitly requires the default branch, and Dependabot groups compatible families while reserving every major update for deliberate review. |
 | A1 | Route identity includes puzzle/collection/action state; new route headings receive focus and are announced, including history navigation. |
 | M1 | Stale puzzle-count copy and audit links were corrected; the follow-up audit uses the canonical name; tracked content and filenames contain no iteration-specific product names. |
 | X1/R1 | Licensing remains excluded. Q8 and P1/P2/P6 in `REMAINING-AUDIT-ITEMS.md` remain deferred and that file is unchanged. |
+
+## 2026-08-02 follow-up review
+
+| Finding | Resolution |
+|---|---|
+| GitHub Actions failed two WebKit recovery cases because WebKit retains a failed module import for the page lifetime | Recovery tests now fail a non-Home lazy route and return to the already-loaded Home route; the original data-preservation and cross-tab reset assertions remain intact. |
+| Unknown puzzle IDs and shared logs above 2,000 actions could mount persistence and overwrite the saved attempt | Route validity is checked before stateful play hooks mount, inbound and outbound sharing use one limit, and invalid routes replace to Home without touching storage. |
+| Home and selector progress snapshots became stale after another tab completed or reset progress | Both views use one storage-event-backed progress hook with a post-subscription re-read. |
+| Hint startup could remain silent or overlap a full laboratory run | A connection owner now enforces startup/result watchdogs, fatal worker events, termination, and synchronous arbitration. |
+| Explicit reduced/full motion did not consistently override the OS and dark secondary text missed contrast targets | Resolved motion is applied before React and globally in CSS; explicit full motion overrides the media fallback, dark tokens exceed 4.5:1, and representative dark/motion views have browser axe coverage. |
+| The progress import file control had no accessible name | The hidden file input has an explicit label and is located by that name in browser coverage. |
+| Failed browser jobs exposed no trace artifacts and action pins lagged reviewed releases | Failure-only Playwright artifacts are retained for seven days and every first-party deployment action is pinned to a reviewed immutable release SHA. |
 
 ## Correctness and data protection
 
@@ -345,3 +357,7 @@ Add dated evidence here whenever an item changes to `FIXED`.
 | 2026-08-01 | D3 | 3/3 service-worker lifecycle tests cover clean-install offline Home/Play refresh, no first-install reload, dialog/worker deferral, navigation-404 safety, same-build revision replacement, and pruning; critical-root closure, positive runtime-fill coverage, and a genuine two-build migration test remain open |
 | 2026-08-01 | T3 | 6/6 gzip-budget/static tests and aggregate coverage gates pass at 68.01% lines, 75.14% branches, and 74.82% functions; the item remains `IN PROGRESS` until typed/generated coverage floors are separate |
 | 2026-08-01 | T4 | Workflow SHA pins were resolved against the official action repositories; default-branch deployment and the supported compatibility-family/major-version Dependabot policy are repository-visible; the complete local validation set passed |
+| 2026-08-02 | Deployment and follow-up review | Reproduced both failed WebKit recovery cases from the GitHub run, corrected their page-lifetime module-failure assumption, and passed 404/404 unit tests, 7/7 static tests, and all 93 locally runnable browser cases with 2 intentional skips across Chromium, WebKit, mobile Chrome, mobile Safari, and the service-worker project |
+| 2026-08-02 | D3, P2, P3 | 44 generated board shards measure 1.66-3.00 KB gzip; Home's transitive closure contains no board payload; the 1,000-room collection renders exactly 50 URL-addressable rows; 3/3 service-worker lifecycle tests cover positive runtime fill, offline direct Play, navigation safety, and distinct worker-generation replacement/pruning |
+| 2026-08-02 | P5, S3, T3 | Five hint-worker lifecycle tests and five generated-engine protocol tests pass; typed coverage is 92.86% lines, 84.44% branches, and 94.35% functions; generated-engine coverage is 41.80%, 63.54%, and 56.25% respectively; exact nested generated payload extraction remains tracked under S3 |
+| 2026-08-02 | T1 and solver regression | The multi-puzzle gate passed all four tiers; Huge passed in 58.8 seconds with the 874-move/304-push rewrite and exact 1,010 moves, 316 pushes, 1,843 visited, and 13,844 generated for base, mirrored, and rotated discovery |

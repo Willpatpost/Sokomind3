@@ -1,6 +1,7 @@
 import type { Direction } from "./model.ts";
 
 export const ACTION_CODES = ["U", "D", "L", "R"] as const;
+export const MAX_SHARED_ACTIONS = 2_000;
 
 export type ActionCode = (typeof ACTION_CODES)[number];
 
@@ -65,6 +66,10 @@ export function decodeActionCode(value: unknown): Direction {
 
 export function isActionLog(value: unknown): value is string {
   return typeof value === "string" && /^[UDLR]*$/.test(value);
+}
+
+export function isShareableActionLog(value: unknown): value is string {
+  return isActionLog(value) && value.length <= MAX_SHARED_ACTIONS;
 }
 
 /**

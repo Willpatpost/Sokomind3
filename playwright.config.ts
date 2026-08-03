@@ -41,6 +41,7 @@ export default defineConfig({
       testMatch: /mobile\.spec\.ts/,
       use: {
         ...devices["Pixel 7"],
+        channel: process.env.CI ? undefined : "chrome",
       },
     },
     {

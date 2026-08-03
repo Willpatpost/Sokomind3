@@ -22,6 +22,7 @@ export {
 
 export {
   ACTION_CODES,
+  MAX_SHARED_ACTIONS,
   ActionLogError,
   decodeActionCode,
   decodeActionLog,
@@ -29,6 +30,7 @@ export {
   encodeDirection,
   isActionCode,
   isActionLog,
+  isShareableActionLog,
   type ActionCode,
   type ActionLogErrorCode,
 } from "./action-log.ts";

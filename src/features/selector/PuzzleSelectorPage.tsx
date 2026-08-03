@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  PUZZLES,
+  PUZZLE_METADATA,
   DIFFICULTY_ORDER,
-  getEffectiveCollection,
-  getCollectionsForDifficulty,
-  getPuzzlesByDifficulty,
-  getBoxCountsForFilter,
+  getMetadataCollectionsForDifficulty,
+  getPuzzleMetadataByDifficulty,
+  getMetadataBoxCounts,
+  type PuzzleMetadata,
   type PuzzleDifficulty,
-} from "@/src/catalog/puzzles";
-import type { PuzzleDefinition } from "@/src/core/model";
-import { loadProgress } from "@/src/shared/progress";
+} from "@/src/catalog/puzzle-metadata";
+import type { ProgressData } from "@/src/shared/progress";
+import { useStoredProgress } from "@/src/shared/use-stored-progress";
 import { isOptimal, loadOptimalCache } from "@/src/shared/optimal-cache";
 import { ExperienceControls } from "@/src/features/experience";
 import {
@@ -18,11 +18,15 @@ import {
   homeHash,
   puzzlesHash,
   puzzleDifficultyHash,
+  puzzleDifficultyPageHash,
   puzzleCollectionHash,
+  puzzleCollectionPageHash,
   playHash,
 } from "@/src/router";
-import type { Route } from "@/src/router";
+import type { Route, RouterValue } from "@/src/router";
 import styles from "./PuzzleSelectorPage.module.css";
+
+const PUZZLES_PER_PAGE = 50;
 
 const DIFFICULTY_LABELS: Record<PuzzleDifficulty, string> = {
   tutorial: "Tutorial",
@@ -55,7 +59,7 @@ interface PuzzleSelectorPageProps {
 
 export function PuzzleSelectorPage({ route }: PuzzleSelectorPageProps) {
   const { navigate } = useRouter();
-  const progress = useMemo(() => loadProgress(), []);
+  const progress = useStoredProgress();
   const completedIds = useMemo(
     () => new Set(Object.keys(progress.completed)),
     [progress],
@@ -73,7 +77,7 @@ export function PuzzleSelectorPage({ route }: PuzzleSelectorPageProps) {
   }, [route]);
 
   const findNextUnsolved = useCallback(
-    (puzzles: readonly PuzzleDefinition[]) => {
+    (puzzles: readonly PuzzleMetadata[]) => {
       return puzzles.find((p) => !completedIds.has(p.id))?.id;
     },
     [completedIds],
@@ -90,7 +94,7 @@ export function PuzzleSelectorPage({ route }: PuzzleSelectorPageProps) {
   }
 
   if (route.page === "puzzles-difficulty") {
-    const collections = getCollectionsForDifficulty(route.difficulty);
+    const collections = getMetadataCollectionsForDifficulty(route.difficulty);
     if (collections.length === 1) {
       return (
         <PuzzleListView
@@ -101,6 +105,7 @@ export function PuzzleSelectorPage({ route }: PuzzleSelectorPageProps) {
           optimalCache={optimalCache}
           progress={progress}
           navigate={navigate}
+          pageNumber={route.pageNumber}
         />
       );
     }
@@ -123,6 +128,7 @@ export function PuzzleSelectorPage({ route }: PuzzleSelectorPageProps) {
       optimalCache={optimalCache}
       progress={progress}
       navigate={navigate}
+      pageNumber={route.pageNumber}
     />
   );
 }
@@ -133,10 +139,13 @@ function DifficultyGrid({
   navigate,
 }: {
   completedIds: ReadonlySet<string>;
-  findNextUnsolved: (p: readonly PuzzleDefinition[]) => string | undefined;
+  findNextUnsolved: (p: readonly PuzzleMetadata[]) => string | undefined;
   navigate: (hash: string) => void;
 }) {
-  const nextId = useMemo(() => findNextUnsolved(PUZZLES), [findNextUnsolved]);
+  const nextId = useMemo(
+    () => findNextUnsolved(PUZZLE_METADATA),
+    [findNextUnsolved],
+  );
 
   return (
     <main className={styles.page}>
@@ -163,7 +172,7 @@ function DifficultyGrid({
 
         <div className={styles.grid}>
           {DIFFICULTY_ORDER.map((difficulty) => {
-            const puzzles = getPuzzlesByDifficulty(difficulty);
+            const puzzles = getPuzzleMetadataByDifficulty(difficulty);
             const solved = puzzles.filter((p) => completedIds.has(p.id)).length;
             const pct = puzzles.length > 0 ? (solved / puzzles.length) * 100 : 0;
             return (
@@ -205,10 +214,13 @@ function CollectionGrid({
   difficulty: PuzzleDifficulty;
   collections: readonly { name: string; count: number }[];
   completedIds: ReadonlySet<string>;
-  findNextUnsolved: (p: readonly PuzzleDefinition[]) => string | undefined;
+  findNextUnsolved: (p: readonly PuzzleMetadata[]) => string | undefined;
   navigate: (hash: string) => void;
 }) {
-  const puzzles = useMemo(() => getPuzzlesByDifficulty(difficulty), [difficulty]);
+  const puzzles = useMemo(
+    () => getPuzzleMetadataByDifficulty(difficulty),
+    [difficulty],
+  );
   const nextId = useMemo(() => findNextUnsolved(puzzles), [findNextUnsolved, puzzles]);
 
   return (
@@ -243,7 +255,7 @@ function CollectionGrid({
         <div className={styles.grid}>
           {collections.map((col) => {
             const colPuzzles = puzzles.filter(
-              (p) => getEffectiveCollection(p) === col.name,
+              (p) => p.collection === col.name,
             );
             const solved = colPuzzles.filter((p) => completedIds.has(p.id)).length;
             const pct = col.count > 0 ? (solved / col.count) * 100 : 0;
@@ -277,14 +289,16 @@ function PuzzleListView({
   optimalCache,
   progress,
   navigate,
+  pageNumber,
   directDifficultyView = false,
 }: {
   difficulty: PuzzleDifficulty;
   collection: string;
   completedIds: ReadonlySet<string>;
   optimalCache: ReturnType<typeof loadOptimalCache>;
-  progress: ReturnType<typeof loadProgress>;
-  navigate: (hash: string) => void;
+  progress: ProgressData;
+  navigate: RouterValue["navigate"];
+  pageNumber?: number;
   directDifficultyView?: boolean;
 }) {
   const [boxFilter, setBoxFilter] = useState<number | null>(null);
@@ -292,26 +306,21 @@ function PuzzleListView({
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setQuery(value);
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedQuery(value), 150);
-  }, []);
+  const pageStatusRef = useRef<HTMLParagraphElement>(null);
+  const previousPageNumberRef = useRef(pageNumber);
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
   const allPuzzles = useMemo(
     () =>
-      getPuzzlesByDifficulty(difficulty).filter(
-        (p) => getEffectiveCollection(p) === collection,
+      getPuzzleMetadataByDifficulty(difficulty).filter(
+        (p) => p.collection === collection,
       ),
     [difficulty, collection],
   );
 
   const boxCounts = useMemo(
-    () => getBoxCountsForFilter(difficulty, collection),
+    () => getMetadataBoxCounts(difficulty, collection),
     [difficulty, collection],
   );
 
@@ -339,6 +348,57 @@ function PuzzleListView({
   const viewLabel = directDifficultyView
     ? DIFFICULTY_LABELS[difficulty]
     : collection;
+  const baseListHash = directDifficultyView
+    ? puzzleDifficultyHash(difficulty)
+    : puzzleCollectionHash(difficulty, collection);
+  const pageHash = useCallback(
+    (nextPage: number) => directDifficultyView
+      ? puzzleDifficultyPageHash(difficulty, nextPage)
+      : puzzleCollectionPageHash(difficulty, collection, nextPage),
+    [collection, difficulty, directDifficultyView],
+  );
+  const pageCount = Math.max(
+    1,
+    Math.ceil(filteredPuzzles.length / PUZZLES_PER_PAGE),
+  );
+  const requestedPage = pageNumber ?? 1;
+  const currentPage = Math.min(requestedPage, pageCount);
+  const pageStart = (currentPage - 1) * PUZZLES_PER_PAGE;
+  const visiblePuzzles = filteredPuzzles.slice(
+    pageStart,
+    pageStart + PUZZLES_PER_PAGE,
+  );
+  const firstResult = filteredPuzzles.length === 0 ? 0 : pageStart + 1;
+  const lastResult = Math.min(
+    pageStart + visiblePuzzles.length,
+    filteredPuzzles.length,
+  );
+
+  const resetPagination = useCallback(() => {
+    if (pageNumber !== undefined) navigate(baseListHash, { replace: true });
+  }, [baseListHash, navigate, pageNumber]);
+
+  const handleSearchChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value;
+      setQuery(value);
+      resetPagination();
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => setDebouncedQuery(value), 150);
+    },
+    [resetPagination],
+  );
+
+  useEffect(() => {
+    if (requestedPage === currentPage) return;
+    navigate(pageHash(currentPage), { replace: true });
+  }, [currentPage, navigate, pageHash, requestedPage]);
+
+  useEffect(() => {
+    if (previousPageNumberRef.current === pageNumber) return;
+    previousPageNumberRef.current = pageNumber;
+    pageStatusRef.current?.focus();
+  }, [pageNumber]);
 
   return (
     <main className={styles.page}>
@@ -402,7 +462,10 @@ function PuzzleListView({
                 className={styles.filterChip}
                 data-active={boxFilter === null || undefined}
                 aria-pressed={boxFilter === null}
-                onClick={() => setBoxFilter(null)}
+                onClick={() => {
+                  setBoxFilter(null);
+                  resetPagination();
+                }}
               >
                 All
               </button>
@@ -413,7 +476,10 @@ function PuzzleListView({
                   className={styles.filterChip}
                   data-active={boxFilter === count || undefined}
                   aria-pressed={boxFilter === count}
-                  onClick={() => setBoxFilter(count)}
+                  onClick={() => {
+                    setBoxFilter(count);
+                    resetPagination();
+                  }}
                 >
                   {count}
                 </button>
@@ -430,7 +496,10 @@ function PuzzleListView({
                 className={styles.filterChip}
                 data-active={completionFilter === value || undefined}
                 aria-pressed={completionFilter === value}
-                onClick={() => setCompletionFilter(value)}
+                onClick={() => {
+                  setCompletionFilter(value);
+                  resetPagination();
+                }}
               >
                 {value.charAt(0).toUpperCase() + value.slice(1)}
               </button>
@@ -449,8 +518,18 @@ function PuzzleListView({
         </div>
 
         {filteredPuzzles.length > 0 ? (
-          <div className={styles.puzzleList}>
-            {filteredPuzzles.map((puzzle) => {
+          <>
+            <p
+              className={styles.resultSummary}
+              ref={pageStatusRef}
+              role="status"
+              tabIndex={-1}
+            >
+              Showing {firstResult}&ndash;{lastResult} of {filteredPuzzles.length}
+              {" puzzles"}
+            </p>
+            <div className={styles.puzzleList}>
+            {visiblePuzzles.map((puzzle) => {
               const complete = completedIds.has(puzzle.id);
               const record = progress.completed[puzzle.id];
               const optimal = record
@@ -462,6 +541,7 @@ function PuzzleListView({
                   key={puzzle.id}
                   type="button"
                   className={styles.puzzleItem}
+                  data-testid="puzzle-row"
                   onClick={() => navigate(playHash(puzzle.id))}
                 >
                   <span className={styles.puzzleNumber}>
@@ -470,7 +550,7 @@ function PuzzleListView({
                   <span className={styles.puzzleCopy}>
                     <strong>{puzzle.title}</strong>
                     <small>
-                      {puzzle.rows[0].length} &times; {puzzle.rows.length}
+                      {puzzle.width} &times; {puzzle.height}
                       {" · "}
                       {puzzle.boxes} {puzzle.boxes === 1 ? "box" : "boxes"}
                     </small>
@@ -486,7 +566,52 @@ function PuzzleListView({
                 </button>
               );
             })}
-          </div>
+            </div>
+            {pageCount > 1 ? (
+              <nav
+                aria-label={`${viewLabel} puzzle pages`}
+                className={styles.pagination}
+              >
+                {currentPage === 1 ? (
+                  <span aria-disabled="true" className={styles.pageLink}>
+                    Previous
+                  </span>
+                ) : (
+                  <Link
+                    className={styles.pageLink}
+                    href={pageHash(currentPage - 1)}
+                  >
+                    Previous
+                  </Link>
+                )}
+                <span className={styles.pageNumbers}>
+                  {Array.from({ length: pageCount }, (_, index) => index + 1)
+                    .map((number) => (
+                      <Link
+                        aria-current={number === currentPage ? "page" : undefined}
+                        className={styles.pageLink}
+                        href={pageHash(number)}
+                        key={number}
+                      >
+                        {number}
+                      </Link>
+                    ))}
+                </span>
+                {currentPage === pageCount ? (
+                  <span aria-disabled="true" className={styles.pageLink}>
+                    Next
+                  </span>
+                ) : (
+                  <Link
+                    className={styles.pageLink}
+                    href={pageHash(currentPage + 1)}
+                  >
+                    Next
+                  </Link>
+                )}
+              </nav>
+            ) : null}
+          </>
         ) : (
           <div className={styles.empty}>
             <strong>No puzzles match</strong>

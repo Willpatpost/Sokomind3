@@ -177,8 +177,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .particles,
-  .ring {
+  :global(html:not([data-motion="full"])) .particles,
+  :global(html:not([data-motion="full"])) .ring {
     display: none;
   }
 }

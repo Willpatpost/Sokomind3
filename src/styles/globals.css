@@ -95,8 +95,8 @@ html[data-theme="dark"] {
   --ink-900: #d8d5cd;
   --ink-800: #c4c0b6;
   --ink-700: #a8a49a;
-  --ink-muted: #8a867c;
-  --ink-subtle: #7d796f;
+  --ink-muted: #9a968c;
+  --ink-subtle: #969288;
   --paper-50: #1a1c19;
   --paper-100: #222420;
   --paper-200: #2e312c;
@@ -119,13 +119,34 @@ html[data-theme="dark"] body {
     linear-gradient(145deg, #1a1c19 0%, #222420 100%);
 }
 
+html[data-motion="reduced"] {
+  scroll-behavior: auto !important;
+}
+
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  scroll-behavior: auto !important;
+  animation-delay: 0ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-delay: 0ms !important;
+  transition-duration: 0.01ms !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  html:not([data-motion="full"]) {
     scroll-behavior: auto !important;
+  }
+
+  html:not([data-motion="full"]) *,
+  html:not([data-motion="full"]) *::before,
+  html:not([data-motion="full"]) *::after {
+    scroll-behavior: auto !important;
+    animation-delay: 0ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    transition-delay: 0ms !important;
     transition-duration: 0.01ms !important;
   }
 }

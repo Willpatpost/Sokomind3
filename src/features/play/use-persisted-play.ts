@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createSession,
+  isShareableActionLog,
   replayActionLog,
   type GameSession,
+  type PuzzleDefinition,
 } from "@/src/core";
-import { getPuzzleById, PUZZLES } from "@/src/catalog/puzzles";
 import {
   recordCompletion,
   type ProgressData,
@@ -33,15 +34,13 @@ export interface CompletionRecordUpdate {
 }
 
 function createInitialSession(
-  puzzleId: string,
+  puzzle: PuzzleDefinition,
   actionLog?: string,
 ): { readonly session: GameSession; readonly restored: boolean } {
-  const puzzle = getPuzzleById(puzzleId);
-  if (!puzzle) {
-    return { session: createSession(PUZZLES[0]), restored: false };
-  }
-
-  if (actionLog) {
+  if (actionLog !== undefined) {
+    if (!isShareableActionLog(actionLog)) {
+      throw new Error("Cannot replay an invalid or oversized shared route.");
+    }
     try {
       return { session: replayActionLog(puzzle, actionLog), restored: false };
     } catch {
@@ -49,8 +48,9 @@ function createInitialSession(
     }
   }
 
-  const stored = loadSession(getPuzzleById);
-  if (stored && stored.session.puzzle.id === puzzleId) {
+  const stored = loadSession((puzzleId) =>
+    puzzleId === puzzle.id ? puzzle : undefined);
+  if (stored && stored.session.puzzle.id === puzzle.id) {
     return { session: stored.session, restored: stored.resumed };
   }
 
@@ -58,12 +58,12 @@ function createInitialSession(
 }
 
 export function usePersistedPlay(
-  puzzleId: string,
+  puzzle: PuzzleDefinition,
   actionLog?: string,
   onSessionRestored?: (moves: number) => void,
 ) {
   const [initialSession] = useState(() =>
-    createInitialSession(puzzleId, actionLog));
+    createInitialSession(puzzle, actionLog));
   const [session, setSession] = useState<GameSession>(initialSession.session);
   const [sessionRestored, setSessionRestored] = useState(
     initialSession.restored,
@@ -89,12 +89,12 @@ export function usePersistedPlay(
 
   useEffect(() => {
     if (initializedRef.current) {
-      const next = createInitialSession(puzzleId, actionLog);
+      const next = createInitialSession(puzzle, actionLog);
       commitSession(next.session);
       setSessionRestored(next.restored);
     }
     initializedRef.current = true;
-  }, [puzzleId, actionLog, commitSession]);
+  }, [puzzle, actionLog, commitSession]);
 
   useEffect(() => {
     if (sessionRestored && session.actionLog.length > 0) {
