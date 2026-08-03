@@ -44,12 +44,12 @@ export function installCrossTabAppResetListener(): () => void {
     clearAppSessionStorage();
     const entry = new URL(window.location.href);
     entry.hash = "";
+    entry.searchParams.set("_r", Date.now().toString(36));
     window.addEventListener("beforeunload", clearAppSessionStorage, {
       once: true,
     });
     window.addEventListener("pagehide", clearAppSessionStorage, { once: true });
-    window.history.replaceState(null, "", entry.href);
-    window.location.reload();
+    window.location.replace(entry.href);
   };
   window.addEventListener("storage", handleStorage);
   return () => window.removeEventListener("storage", handleStorage);

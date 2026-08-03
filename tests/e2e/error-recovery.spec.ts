@@ -40,10 +40,8 @@ test("error recovery reloads safely and confirms exact-key data reset", async ({
     page.getByRole("heading", { name: "Something went wrong" }),
   ).toBeVisible();
 
-  await Promise.all([
-    page.waitForNavigation(),
-    page.getByRole("button", { name: "Reload Sokomind" }).click(),
-  ]);
+  await page.getByRole("button", { name: "Reload Sokomind" }).click();
+  await page.waitForURL(/[?&]_r=/);
   await expect(
     page.getByRole("heading", { name: "Something went wrong" }),
   ).toBeVisible();

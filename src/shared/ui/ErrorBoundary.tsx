@@ -23,8 +23,15 @@ export class ErrorBoundary extends Component<
     console.error("Sokomind caught an unrecoverable rendering error:", error, info);
   }
 
+  #hardNavigate = () => {
+    const url = new URL(window.location.href);
+    url.hash = "";
+    url.searchParams.set("_r", Date.now().toString(36));
+    window.location.replace(url.href);
+  };
+
   #handleReload = () => {
-    window.location.reload();
+    this.#hardNavigate();
   };
 
   #handleReset = () => {
@@ -34,8 +41,7 @@ export class ErrorBoundary extends Component<
     if (!confirmed) return;
 
     resetAppData();
-    window.location.hash = "";
-    window.location.reload();
+    this.#hardNavigate();
   };
 
   override render() {
